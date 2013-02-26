@@ -14,6 +14,8 @@ http://www.google.com          Body
 Total e-mail addresses 2
 Total URLs          1
 """
+
+
 # import modules
 import optparse
 import os
@@ -25,14 +27,18 @@ import logging.handlers
 import ConfigParser
 import json
 import pickle
+
+
 # constants
-RE_EMAIL = '[\w\.=-]+@(?:[\w-]+\.)+\w{2,4}'
+RE_EMAIL = "[\w\.=-]+@(?:[\w-]+\.)+\w{2,4}"
 #RE_EMAIL = '[\w\.=-]+@([a-z0-9-]+)(\.)([a-z]{2,4})(\.?)([a-z]{0,4})'
 #RE_EMAIL = '[\w\.=-]+@[\w\.-]+\.[\w]{2,3}'
-RE_URL = 'https?:\/\/[^ \n\r]+'
+RE_URL = "https?:\/\/[^ \n\r]+"
 #(?=[\s\.,$])' <- look-ahead
 # defaults
 LOG_PARSER = logging.getLogger(__name__)
+
+
 #functions
 def email_addr_count(inp):
     """
@@ -75,6 +81,8 @@ def email_addr_count(inp):
 
     """
     return sorted(list(re.findall(RE_EMAIL, inp)))
+
+
 def url_addr_count(inp):
     """
     find urls in string cancelling duplicates
@@ -104,20 +112,38 @@ def url_addr_count(inp):
 
     """
     return sorted(list(re.findall(RE_URL, inp)))
+
+
 def lst_from_dct(dct):
     """
     parsing dictionary, count emails and urls in fields without duplicates and log
     : param dct: input dictionary (dict)
     : return email_list, url_list: output lists of emails and urls (list, list)
     """
-# create lists of all emails&urls depends on dictionary content
+# create lists of all emails&urls depending on dictionary content
     email_list = []
     url_list = []
+# collect the emails and extend the list of emails
     for k in ("from", "to", "cc", "bcc", "bodyemails"):
         if dct.get(k):
+# log emails parsing
+            LOG_PARSER.debug("%s " % ", ".join(set(dct[k])) +
+                             "%s" % k.upper())
+# add each email to list
             email_list.extend(dct[k])
+# collect the urls and create the list of urls
     if dct.get("bodyurls"):
-        url_list = list(dct['bodyurls'])
+# log urls parsing
+        LOG_PARSER.debug("%s " % ", ".join(set(dct["bodyurls"])) +
+                         "%s" % "bodyurls".upper())
+# create the list of urls
+        url_list = list(dct["bodyurls"])
+# log the statistic
+    LOG_PARSER.debug("---")
+    LOG_PARSER.debug("Total e-mail addresses %s" % \
+                     len(set(email_list)))
+    LOG_PARSER.debug("Total URLs %s" % \
+                     len(set(url_list)))
 # save all results to mp.rpt
 #    with open("mp.rpt", "w") as file_to_out:
 #        for k in ("from", "to", "cc", "bcc", "bodyemails", "bodyurls"):
@@ -129,37 +155,62 @@ def lst_from_dct(dct):
 #                          len(set(email_list)) + "\n")
 #        file_to_out.write("Total URLs %s" % \
 #                         len(set(url_list)) + "\n")
-# log results
-    for k in ("from", "to", "cc", "bcc", "bodyemails", "bodyurls"):
-        if dct.get(k):
-            for value in dct[k]:
-                LOG_PARSER.debug("%s " % value + "%s" % k.upper())
-    LOG_PARSER.debug("---")
-    LOG_PARSER.debug("Total e-mail addresses %s" % \
-                     len(set(email_list)))
-    LOG_PARSER.debug("Total URLs %s" % \
-                     len(set(url_list)))
     return (email_list, url_list)
-def json_from_dct(dct, email_list, url_list):
+
+
+def email_url_dct(dct, email_list, url_list):
     """
-    parsing dictionary, list of emails and urls and create dictionary as JSON
+    parsing dictionary, list of emails and urls and create dictionary
+    of emails&urls without duplicates and counts it in each field
     : param dct: input dictionary (dict)
     : param email_list: list of emails (list)
     : param url_list: list of urls (list)
-    : return json_dct: dictionary as JSON (dict)
+    : return e_u_dct: dictionary of emails&urls (dict)
     """
-# create dictionary as JSON
-    json_dct = {}
+# create dictionary of emails&urls
+    e_u_dct = {}
+# create entries for emails without duplicates
     for email_key in set(email_list):
-        json_entry = {}
+        d_entry = {}
+# count entries in all fields
         for key in ("from", "to", "cc", "bcc", "bodyemails"):
+# create entry of each field if it exist
             if dct.get(key) and dct[key].count(email_key) > 0:
-                json_entry[key] = dct[key].count(email_key)
-        json_dct[email_key] = json_entry
+                d_entry[key] = dct[key].count(email_key)
+# save it in dectionary
+        e_u_dct[email_key] = d_entry
+# create entries for urls without duplicates
     for url_key in set(url_list):
-        if dct.get("bodyurls") and dct["bodyurls"].count(url_key) > 0:
-            json_dct[url_key] = dct["bodyurls"].count(url_key)
-    return json_dct
+        e_u_dct[url_key] = dct["bodyurls"].count(url_key)
+    return e_u_dct
+
+
+def set_log_stream(log_dir):
+    """
+    set the direction/handler of logging - console, syslog or file name
+    : param log_dir: direction console|syslog|file name (string)
+    """
+# logging depends on console, syslog or file output
+    formatter = logging.Formatter("%(asctime)s %(levelname)s:%(filename)s:"
+                                  "%(module)s.%(funcName)s:"
+                                  "%(lineno)d - %(message)s",
+                                  "%d/%m/%Y %H:%M:%S")
+# if console output then handler is sys.stderr
+    if log_dir == "console":
+        hdlr = logging.StreamHandler(sys.stderr)
+# if syslog output then handler is /dev/syslog
+    elif log_dir == "syslog":
+        formatter = logging.Formatter("%(levelname)s:%(filename)s:"
+                                      "%(module)s.%(funcName)s:"
+                                      "%(lineno)d - %(message)s")
+        hdlr = logging.handlers.SysLogHandler(address="/dev/log")
+# if file output then handler is file
+    else:
+        hdlr = logging.FileHandler(log_dir)
+    hdlr.setFormatter(formatter)
+    LOG_PARSER.addHandler(hdlr)
+
+
 def set_verb(verb):
     """
     set verbosity level
@@ -176,18 +227,20 @@ def set_verb(verb):
         LOG_PARSER.setLevel(logging.DEBUG)
     else:
         LOG_PARSER.error("verbose level must be 0, 1, 2 or 3...")
-        sys.exit(0)
+        sys.exit(1)
+
+
 def parse_file(path):
     """
     determine file type, parse it and return valid JSON/PKL dictionary
-    or emty dictionary if file is corrupt
+    or emty dictionary if file is corrupted
     or not valid JSON/PKL or it does not exist
     : param path: file name (string)
     : return {}|parsed_data: parsed dictionary JSON/PKL (dict)
     """
 # JSON/PKL formats definition
-    formats = {'json': lambda x: json.loads(x),
-               'pickle': lambda x: pickle.loads(x)}
+    formats = {"json": lambda x: json.loads(x),
+               "pickle": lambda x: pickle.loads(x)}
     try:
 # try to read file
         with open(path, "r") as file_input:
@@ -210,124 +263,152 @@ def parse_file(path):
                 return parsed_data
             else:
 # return empty dictionary if it is not valid = not a dictionary
-                LOG_PARSER.debug("output file is not valid JSON/PKL...")
+                LOG_PARSER.warning("output file is not valid JSON/PKL...")
                 return {}
         except:
 # do nothing, try next iteration and next format
             pass
 # warning if loaded data not parsed as defined JSON/PKL
-    LOG_PARSER.debug("output file is not JSON/PKL or corrupt...")
-# return empty dictionary if loaded data not JSON/PKL or corrupt
+    LOG_PARSER.warning("output file is not JSON/PKL or corrupted...")
+# return empty dictionary if loaded data not JSON/PKL or corrupted
     return {}
-def json_dct_merge(j_curr, j_prev):
+
+
+def parse_msg(message):
     """
-    parsing dictionary, list of emails and urls and create dictionary as JSON
-    : param j_curr: current/new dictionary as JSON (dict)
-    : param j_prev: previous/old dictionary as JSON (dict)
-    : return j_upda: dictionary as JSON (dict)
+    parse string as email message, fill the dictionary with particular fields
+    log warnings if message does not have fields FROM, TO or BODY of message
+    log error if message does not have FROM&TO
+    fields both and return empty dictionary
+    : param message: message (string)
+    : return dct: dictionary with parsed fields and it's content (dict)
     """
-# updating old dictionary from file
-    for key in j_curr.keys():
+# defaults
+    dct = {}
+# if MSG from file does not have fields FROM&TO then it does not valid MSG
+    if (not message.get("from")) and (not message.get("to")):
+        LOG_PARSER.error("MSG is not a valid email message")
+        return dct
+#        sys.exit(1)
+# try to get FROM field
+    if message.get("from"):
+# create dictionary entry as list of valid emails
+        dct["from"] = email_addr_count(message["from"])
+# warning if it does not have valid emails
+        if len(dct.get("from", [])) == 0:
+            LOG_PARSER.warning("MSG does not have valid email"
+                               " address *FROM*")
+# warning if it does not have field FROM
+    else:
+        LOG_PARSER.warning("MSG does not contain field *FROM*")
+# try to get TO field
+    if message.get("to"):
+# create dictionary entry as list of valid emails
+        dct["to"] = email_addr_count(message["to"])
+# warning if it does not have valid emails
+        if len(dct.get("to", [])) == 0:
+            LOG_PARSER.warning("MSG does not have valid email"
+                                   " address *TO*")
+# warning if it does not have field TO
+    else:
+        LOG_PARSER.warning("MSG does not contain field *TO*")
+# try to get CC field and create dictionary entry
+    if message.get("cc"):
+        dct["cc"] = email_addr_count(message["cc"])
+# try to get BCC field and create dictionary entry
+    if message.get("bcc"):
+        dct["bcc"] = email_addr_count(message["bcc"])
+# try to get BODY of message
+    if len(message.get_payload()) > 0:
+        body = message.get_payload()
+# parsing BODY for valid emails&urls and create dictionary entries
+        dct["bodyemails"] = email_addr_count(body)
+        dct["bodyurls"] = url_addr_count(body)
+# warning if it does not have valid emails&urls
+        if len(dct.get("bodyemails",
+                       [])) == 0 and len(dct.get("bodyurls",
+                       [])) == 0:
+            LOG_PARSER.warning("MSG does not contain any"
+                               " url or email address in *BODY*")
+# warning if it does not have field BODY
+    else:
+        LOG_PARSER.warning("MSG does not contain field *BODY*")
+    return dct
+
+
+def dct_merge(d_curr, d_prev):
+    """
+    merging two dictionaries of emails&urls and updating input dictionary
+    : param d_curr: current/new dictionary (dict)
+    : param d_prev: previous/old dictionary (dict)
+    : return d_prev: merged/updated dictionary (dict)
+    """
+# updating previous/old dictionary from current/new
+    for key in d_curr.keys():
 # check if url
-        if '://' in key:
-# update matched old url counter by new value
-            j_prev[key] = j_prev.get(key, 0) + j_curr[key]
-# check if new url
-            if key not in j_prev.keys():
-# update dictionary by new url
-                j_prev[key] = j_curr[key]
-# if not url = email
+        if "://" in key:
+# add current/new value to previous/old dictionary and update matched urls
+            d_prev[key] = d_prev.get(key, 0) + d_curr[key]
+# if not url then email
         else:
-# check if current email matched old email
-            if key in j_prev.keys():
-# for matched old email with old values
-                for key_email in j_curr[key].keys():
+# check if current/new email matched previous/old email
+            if key in d_prev.keys():
+# for matched new/old emails
+                for key_email in d_curr[key].keys():
 # update old email values by new email values
-                    j_prev[key][key_email] = j_prev[key].get(key_email, 0) \
-                                             + j_curr[key][key_email]
-# update dictionary by new email
+                    d_prev[key][key_email] = d_prev[key].get(key_email, 0) \
+                                             + d_curr[key][key_email]
+# update old dictionary by new email
             else:
-                j_prev[key] = j_curr[key]
-    return j_prev
+                d_prev[key] = d_curr[key]
+    return d_prev
+
+
+def save_out(d_curr, o_file, o_format):
+    """
+    save results to output file in JSON|PKL format
+    : param d_curr: current dictionary with updated content (dct)
+    : param o_file: output filename (string)
+    : param o_format: output format: "JSON" | "PKL"
+    """
+# create output data as JSON/PKL
+    if o_format == "JSON":
+        LOG_PARSER.debug("create JSON file...")
+        to_file = json.dumps(d_curr)
+    elif o_format == "PKL":
+        LOG_PARSER.debug("create PKL file...")
+        to_file = pickle.dumps(d_curr)
+# write output data to file
+    with open(o_file, "w") as file_out:
+        file_out.write(to_file)
+
+
 def msg_from_file(file_name, o_file, o_format):
     """
     parsing file as MSG, find emails and urls in fields and log
     : param file_name: input filename/folder (string)
     : param o_file: output filename (string)
-    : param o_format: output format: 'JSON' | 'PKL"
+    : param o_format: output format: "JSON" | "PKL"
     """
 # checking MSG content and creating dictionary
-    dct = {}
-    with open(file_name, 'r') as file_to_read:
+    with open(file_name, "r") as file_to_read:
 # parsing file as MSG
         message = email.message_from_file(file_to_read)
-# if MSG from file does not have fields FROM&TO then it does not valid MSG
-        if (not message.get("from")) and (not message.get("to")):
-            LOG_PARSER.error("MSG is not a valid email message")
-            return
-# try to get FROM field
-        if message.get("from"):
-# create dictionary entry as list of valid emails
-            dct["from"] = email_addr_count(message["from"])
-# warning if it does not have valid emails
-            if len(dct.get("from", [])) == 0:
-                LOG_PARSER.warning("MSG does not have valid email"
-                                   " address *FROM*")
-# warning if it does not have field FROM
-        else:
-            LOG_PARSER.warning("MSG does not contain field *FROM*")
-# try to get TO field
-        if message.get("to"):
-# create dictionary entry as list of valid emails
-            dct["to"] = email_addr_count(message["to"])
-# warning if it does not have valid emails
-            if len(dct.get("to", [])) == 0:
-                LOG_PARSER.warning("MSG does not have valid email"
-                                   " address *TO*")
-# warning if it does not have field TO
-        else:
-            LOG_PARSER.warning("MSG does not contain field *TO*")
-# try to get CC field and create dictionary entry
-        if message.get("cc"):
-            dct["cc"] = email_addr_count(message["cc"])
-# try to get BCC field and create dictionary entry
-        if message.get("bcc"):
-            dct["bcc"] = email_addr_count(message["bcc"])
-# try to get BODY of message
-        if len(message.get_payload()) > 0:
-            body = message.get_payload()
-# parsing BODY for valid emails&urls and create dictionary entries
-            dct["bodyemails"] = email_addr_count(body)
-            dct["bodyurls"] = url_addr_count(body)
-# warning if it does not have valid emails&urls
-            if len(dct.get("bodyemails",
-                           [])) == 0 and len(dct.get("bodyurls",
-                           [])) == 0:
-                LOG_PARSER.warning("MSG does not contain any"
-                            " url or email address in *BODY*")
-# warning if it does not have field BODY
-        else:
-            LOG_PARSER.warning("MSG does not contain field *BODY*")
+# parsing content of message
+    dct = parse_msg(message)
 # create lists of emails&urls from current dictionary
     email_list, url_list = lst_from_dct(dct)
-# create current/new dictionary as JSON
-    j_c = json_from_dct(dct, email_list, url_list)
+# create current/new dictionary of emails&urls
+    d_curr = email_url_dct(dct, email_list, url_list)
 # update current/new dictionary from file
-    j_c = json_dct_merge(j_c, parse_file(o_file))
-#    print "dict -", dct
-#    print "emails -", len(email_list), "-", email_list
-#    print "urls -", url_list
-# create output data as JSON/PKL
-    if o_format == "JSON":
-        LOG_PARSER.debug("create JSON file...")
-        to_file = json.dumps(j_c)
-    elif o_format == "PKL":
-        LOG_PARSER.debug("create PKL file...")
-        to_file = pickle.dumps(j_c)
-# write output data to file
-    with open(o_file, "w") as file_out:
-        file_out.write(to_file)
+    d_curr = dct_merge(d_curr, parse_file(o_file))
+#    print "current:", d_curr
+# save output if current parsed MSG is not empty
+    if d_curr != {}:
+        save_out(d_curr, o_file, o_format)
 # end of functions
+
+
 def main():
     """
     main module
@@ -367,31 +448,14 @@ def main():
             options.savetype = config.get("msg","type")
             options.logfile = config.get("msg","logfile")
             options.verbose = config.get("msg","verbose")
-# logging depends on console, syslog or file output
-        formatter = logging.Formatter("%(asctime)s %(levelname)s:%(filename)s:"
-                                      "%(module)s.%(funcName)s:"
-                                      "%(lineno)d - %(message)s",
-                                      "%d/%m/%Y %H:%M:%S")
-# if console output then handler is sys.stderr
-        if options.logfile == "console":
-            hdlr = logging.StreamHandler(sys.stderr)
-# if syslog output then handler is /dev/syslog
-        elif options.logfile == "syslog":
-            formatter = logging.Formatter("%(levelname)s:%(filename)s:"
-                                          "%(module)s.%(funcName)s:"
-                                          "%(lineno)d - %(message)s")
-            hdlr = logging.handlers.SysLogHandler(address="/dev/log")
-# if file output then handler is file
-        else:
-            hdlr = logging.FileHandler(options.logfile)
-        hdlr.setFormatter(formatter)
-        LOG_PARSER.addHandler(hdlr)
+# set logging stream direction
+        set_log_stream(options.logfile)
 # set verbosity level
         set_verb(options.verbose)
 # checking file type JSON/pickle
         if options.savetype not in ("JSON", "PKL"):
             LOG_PARSER.error("file type must be JSON or PKL...")
-            sys.exit(0)
+            sys.exit(1)
 # parse directory/file
         if options.filename:
 # if directory
@@ -411,18 +475,20 @@ def main():
                               options.savetype)
             else:
                 LOG_PARSER.error("file does not exist...")
-                sys.exit(0)
+                sys.exit(1)
 # input file must be set
         else:
             mailparser.print_help()
             LOG_PARSER.error("FILENAME must be set...")
-            sys.exit(0)
+            sys.exit(1)
 # if something wrong in general get exception info for debugging
     except Exception:
 #        mailparser.print_help()
         LOG_PARSER.error("general exception...")
         LOG_PARSER.error(sys.exc_info())
-        sys.exit(0)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
 #    import doctest
 #    doctest.testmod()
