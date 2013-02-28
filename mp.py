@@ -27,13 +27,16 @@ import logging.handlers
 import ConfigParser
 import json
 import pickle
-
+import hashlib
+#import HTMLParser
+#import html2text
 
 # constants
-RE_EMAIL = "[\w\.=-]+@(?:[\w-]+\.)+\w{2,4}"
+RE_EMAIL = "[\w\.=-]+@(?:[\w-]+\.)+[a-z]{2,4}"
 #RE_EMAIL = '[\w\.=-]+@([a-z0-9-]+)(\.)([a-z]{2,4})(\.?)([a-z]{0,4})'
 #RE_EMAIL = '[\w\.=-]+@[\w\.-]+\.[\w]{2,3}'
-RE_URL = "https?:\/\/[^ \n\r]+"
+RE_URL = "https?:\/\/[^ \n\r\"<>]+"
+#[^\"<>]+"
 #(?=[\s\.,$])' <- look-ahead
 # defaults
 LOG_PARSER = logging.getLogger(__name__)
@@ -205,8 +208,13 @@ def set_log_stream(log_dir):
                                       "%(lineno)d - %(message)s")
         hdlr = logging.handlers.SysLogHandler(address="/dev/log")
 # if file output then handler is file
-    else:
+    elif log_dir:
         hdlr = logging.FileHandler(log_dir)
+    else:
+#        LOG_PARSER.error("console|syslog|file must be set...")
+#        mailparser.print_help()
+        print "log to console|syslog|file must be set..."
+        sys.exit(1)
     hdlr.setFormatter(formatter)
     LOG_PARSER.addHandler(hdlr)
 
@@ -319,8 +327,9 @@ def parse_msg(message):
     if message.get("bcc"):
         dct["bcc"] = email_addr_count(message["bcc"])
 # try to get BODY of message
-    if len(message.get_payload()) > 0:
-        body = message.get_payload()
+    if message.get_payload():
+# get the string = BODY of message
+        body = get_body(message)
 # parsing BODY for valid emails&urls and create dictionary entries
         dct["bodyemails"] = email_addr_count(body)
         dct["bodyurls"] = url_addr_count(body)
@@ -330,10 +339,44 @@ def parse_msg(message):
                        [])) == 0:
             LOG_PARSER.warning("MSG does not contain any"
                                " url or email address in *BODY*")
-# warning if it does not have field BODY
+# warning if message does not have BODY
     else:
         LOG_PARSER.warning("MSG does not contain field *BODY*")
     return dct
+
+
+def get_body(msg):
+    """
+    parse message body as multipart or string, decode it
+    : param msg: message (instance)
+    : return text: body as decoded string (str)
+    """
+# try to get BODY of message
+    body_content = ""
+    body_parts = []
+# if message multipart
+    if msg.is_multipart():
+        LOG_PARSER.debug("MSG has *MULTIPART* body")
+# for each part of message body
+        for part in msg.walk():
+            charset = part.get_content_charset()
+#            print "content:", part.get_content_type()
+# if content is text then create/append a list of parts
+            if part.get_content_type() in ("text/plain", "text/html"):
+                body_parts.append(unicode(part.get_payload(decode=True),
+                                  str(charset),
+                                  "ignore").encode("utf8", "replace"))
+#        print "body lenth:", len(body_parts)
+# get one string from list of content parts
+        body_content = "".join(body_parts)
+        return body_content.strip()
+# if message not multipart = string
+    else:
+# decode contents as one string
+        body_content = unicode(msg.get_payload(decode=True),
+                               msg.get_content_charset(),
+                               "ignore").encode("utf8", "replace")
+        return body_content.strip()
 
 
 def dct_merge(d_curr, d_prev):
@@ -383,7 +426,52 @@ def save_out(d_curr, o_file, o_format):
         file_out.write(to_file)
 
 
-def msg_from_file(file_name, o_file, o_format):
+def is_msg_parsed(message, hash_file):
+    """
+    count message checksum and compare it checksum
+    with stored in file what contain checksums of
+    previously parsed messages
+    : param message: message (string)
+    : param hash_file: checksum file name (string)
+    : return True|False: True if message was parsed | False if not (boolean)
+    """
+#    with open(msg_file, 'rb') as fh:
+#        m = hashlib.sha224()
+#        while True:
+#            data = fh.read(8192)
+#            if not data:
+#                break
+#            m.update(data)
+#    print m.hexdigest()
+#    print type(message)
+
+# get checksum of message
+    encrypted = hashlib.sha1(message).hexdigest()
+# check if file with checksums exist
+    if os.path.isfile(hash_file):
+# if exist - read the data
+        with open(hash_file, "r") as chksum_file:
+            hash_data = chksum_file.read()
+# compare message checksum with stored
+        if encrypted in hash_data:
+# if checksum was stored then message was parsed = True
+            LOG_PARSER.debug("message was parsed, hashed and stored...")
+            return True
+# if checksum was not stored then message was not parsed = False and update file
+        else:
+            with open(hash_file, "a") as chksum_file:
+                LOG_PARSER.debug("hash file updated...")
+                chksum_file.write(encrypted + "\n")
+                return False
+# if file with checksums not exist then create it
+    else:
+        with open(hash_file, "a") as chksum_file:
+            LOG_PARSER.debug("hash file does not exist, created...")
+            chksum_file.write(encrypted + "\n")
+            return False
+
+
+def msg_from_file(file_name, o_file, o_format, hash_file):
     """
     parsing file as MSG, find emails and urls in fields and log
     : param file_name: input filename/folder (string)
@@ -392,20 +480,27 @@ def msg_from_file(file_name, o_file, o_format):
     """
 # checking MSG content and creating dictionary
     with open(file_name, "r") as file_to_read:
-# parsing file as MSG
-        message = email.message_from_file(file_to_read)
+# check if loaded message was parsed
+        if not is_msg_parsed(file_to_read.read(), hash_file):
+# parsing it as MSG if it new
+            file_to_read.seek(0, 0)
+            message = email.message_from_file(file_to_read)
+# if it was parsed then None message
+        else:
+            message = None
+    if message:
 # parsing content of message
-    dct = parse_msg(message)
+        dct = parse_msg(message)
 # create lists of emails&urls from current dictionary
-    email_list, url_list = lst_from_dct(dct)
+        email_list, url_list = lst_from_dct(dct)
 # create current/new dictionary of emails&urls
-    d_curr = email_url_dct(dct, email_list, url_list)
+        d_curr = email_url_dct(dct, email_list, url_list)
 # update current/new dictionary from file
-    d_curr = dct_merge(d_curr, parse_file(o_file))
+        d_curr = dct_merge(d_curr, parse_file(o_file))
 #    print "current:", d_curr
 # save output if current parsed MSG is not empty
-    if d_curr != {}:
-        save_out(d_curr, o_file, o_format)
+        if d_curr != {}:
+            save_out(d_curr, o_file, o_format)
 # end of functions
 
 
@@ -414,65 +509,62 @@ def main():
     main module
     """
 # defaults
-    usage = "usage: %prog [options] -f FILENAME"
+    usage = "usage: %prog -c CONFIGFILE"
 # parsing the CLI string for options and arguments
     mailparser = optparse.OptionParser(usage,
                 epilog = "MSG parser - "
                 "parse MSG file for valid emails&urls, "
                 "save result and log")
-    mailparser.add_option("-f", "--file", dest="filename",
-                          help="read data from FILENAME")
-    mailparser.add_option("-c", "--config", dest="cfg",
+    mailparser.add_option("-c", "--config", dest="cfg", default="default.cfg",
                           help="read from CONFIGFILE")
-    mailparser.add_option("-o", "--output", dest="output", default="mp.out",
-                          help="save data to OUTPUTFILENAME")
-    mailparser.add_option("-t", "--type", dest="savetype", default="JSON",
-                          help="output file type JSON or PKL [default - JSON]")
-    mailparser.add_option("-l", "--logfile", dest="logfile", default="console",
-                          help="log to LOGFILENAME [default console]")
-    mailparser.add_option("-v", "--verbose", dest="verbose", default="0",
-                          help="verbosity level [default 0 - silent]")
     try:
         (options, args) = mailparser.parse_args()
 # set options from INI file if exist, all options will be overriden
-        config = ConfigParser.SafeConfigParser({"filename": options.filename,
-                                                "output": options.output,
-                                                "type": options.savetype,
-                                                "logfile": options.logfile,
-                                                "verbose": options.verbose})
+        config = ConfigParser.SafeConfigParser({"filename": "",
+                                                "output": "",
+                                                "type": "",
+                                                "logfile": "",
+                                                "verbose": "",
+                                                "hashfile": ""})
 # if config INI is set just read actual options from INI
         if options.cfg:
             config.read(options.cfg)
-            options.filename = config.get("msg","filename")
-            options.output =  config.get("msg","output")
-            options.savetype = config.get("msg","type")
-            options.logfile = config.get("msg","logfile")
-            options.verbose = config.get("msg","verbose")
+            filename = config.get("msg","filename")
+            output =  config.get("msg","output")
+            savetype = config.get("msg","type")
+            logfile = config.get("msg","logfile")
+            verbose = config.get("msg","verbose")
+            hashfile = config.get("msg","hashfile")
+        else:
+            mailparser.print_help()
+            sys.exit(1)
 # set logging stream direction
-        set_log_stream(options.logfile)
+        set_log_stream(logfile)
 # set verbosity level
-        set_verb(options.verbose)
+        set_verb(verbose)
 # checking file type JSON/pickle
-        if options.savetype not in ("JSON", "PKL"):
+        if savetype not in ("JSON", "PKL"):
             LOG_PARSER.error("file type must be JSON or PKL...")
             sys.exit(1)
 # parse directory/file
-        if options.filename:
+        if filename:
 # if directory
-            if os.path.isdir(options.filename):
+            if os.path.isdir(filename):
 # for files in directory only
-                for file_name in os.listdir(options.filename):
+                for file_name in os.listdir(filename):
 # only if file, it does not parse directory in directory
-                    if os.path.isfile(file_name):
+                    if os.path.isfile(os.path.join(filename, file_name)):
 # call the function for each file
-                        msg_from_file(os.path.join(options.filename, file_name),
-                                      options.output,
-                                      options.savetype)
+                        msg_from_file(os.path.join(filename, file_name),
+                                      output,
+                                      savetype,
+                                      hashfile)
 # call the function for particular file
-            elif os.path.isfile(options.filename):
-                msg_from_file(options.filename,
-                              options.output,
-                              options.savetype)
+            elif os.path.isfile(filename):
+                msg_from_file(filename,
+                              output,
+                              savetype,
+                              hashfile)
             else:
                 LOG_PARSER.error("file does not exist...")
                 sys.exit(1)
@@ -481,9 +573,11 @@ def main():
             mailparser.print_help()
             LOG_PARSER.error("FILENAME must be set...")
             sys.exit(1)
-# if something wrong in general get exception info for debugging
+# if something went wrong in general get exception info for debugging
     except Exception:
-#        mailparser.print_help()
+        mailparser.print_help()
+        print ("general exception...")
+        print sys.exc_info()
         LOG_PARSER.error("general exception...")
         LOG_PARSER.error(sys.exc_info())
         sys.exit(1)
