@@ -345,40 +345,6 @@ def parse_msg(message):
     return dct
 
 
-def get_body(msg):
-    """
-    parse message body as multipart or string, decode it
-    : param msg: message (instance)
-    : return text: body as decoded string (str)
-    """
-# try to get BODY of message
-    body_content = ""
-    body_parts = []
-# if message multipart
-    if msg.is_multipart():
-        LOG_PARSER.debug("MSG has *MULTIPART* body")
-# for each part of message body
-        for part in msg.walk():
-            charset = part.get_content_charset()
-#            print "content:", part.get_content_type()
-# if content is text then create/append a list of parts
-            if part.get_content_type() in ("text/plain", "text/html"):
-                body_parts.append(unicode(part.get_payload(decode=True),
-                                  str(charset),
-                                  "ignore").encode("utf8", "replace"))
-#        print "body lenth:", len(body_parts)
-# get one string from list of content parts
-        body_content = "".join(body_parts)
-        return body_content.strip()
-# if message not multipart = string
-    else:
-# decode contents as one string
-        body_content = unicode(msg.get_payload(decode=True),
-                               msg.get_content_charset(),
-                               "ignore").encode("utf8", "replace")
-        return body_content.strip()
-
-
 def dct_merge(d_curr, d_prev):
     """
     merging two dictionaries of emails&urls and updating input dictionary
@@ -426,13 +392,47 @@ def save_out(d_curr, o_file, o_format):
         file_out.write(to_file)
 
 
-def is_msg_parsed(message, hash_file):
+def get_body(msg):
+    """
+    parse message body as multipart or string
+    : param msg: message (instance)
+    : return text: body as decoded string (str)
+    """
+# try to get BODY of message
+    body_content = ""
+    body_parts = []
+# if message multipart
+    if msg.is_multipart():
+        LOG_PARSER.debug("MSG has *MULTIPART* body")
+# for each part of message body
+        for part in msg.walk():
+            charset = part.get_content_charset()
+#            print "content:", part.get_content_type()
+# if content is text then create/append a list of parts
+            if part.get_content_type() in ("text/plain", "text/html"):
+                body_parts.append(unicode(part.get_payload(decode=True),
+                                  str(charset),
+                                  "ignore").encode("utf8", "replace"))
+#        print "body lenth:", len(body_parts)
+# get one string from list of content parts
+        body_content = "".join(body_parts)
+# if message not multipart = string
+    else:
+# decode contents as one string
+        body_content = unicode(msg.get_payload(decode=True),
+                               msg.get_content_charset(),
+                               "ignore").encode("utf8", "replace")
+    return body_content.strip()
+
+
+def is_msg_parsed(msg_file, hash_file, hash_sign):
     """
     count message checksum and compare it checksum
-    with stored in file what contain checksums of
-    previously parsed messages
+    with stored in file that contains checksums of
+    previously parsed messages depending on hash sign
     : param message: message (string)
     : param hash_file: checksum file name (string)
+    : param hash_sign: checksum counts as FILE|BODY (string)
     : return True|False: True if message was parsed | False if not (boolean)
     """
 #    with open(msg_file, 'rb') as fh:
@@ -445,62 +445,83 @@ def is_msg_parsed(message, hash_file):
 #    print m.hexdigest()
 #    print type(message)
 
+#    print msg_file, hash_file, hash_sign
+
+# get the message data for count checksum of MSG
+    with open(msg_file, "r") as file_to_read:
+# get the message as string depending on FILE hash sign
+        if hash_sign == "FILE":
+            message = file_to_read.read()
+# get the only body of MSG depending on BODY hash sign
+        elif hash_sign == "BODY":
+            msg = email.message_from_file(file_to_read)
+            if get_body(msg):
+                message = get_body(msg)
+# return True = parsed if it does not have body
+            else:
+                LOG_PARSER.debug("empty *BODY*, checksum is not counted...")
+                return True
 # get checksum of message
     encrypted = hashlib.sha1(message).hexdigest()
 # check if file with checksums exist
     if os.path.isfile(hash_file):
-# if exist - read the data
+# defines
+        hash_data = []
+# if exists - read the hash data
         with open(hash_file, "r") as chksum_file:
-            hash_data = chksum_file.read()
-# compare message checksum with stored
+# creates list of checksums depending on stated hash sign
+            for hash_line in chksum_file:
+# get only the hash string
+                if list(hash_line.split())[0] == hash_sign:
+# crate hash data list
+                    hash_data.append(list(hash_line.split())[1])
+# compare message checksum with hash list
         if encrypted in hash_data:
 # if checksum was stored then message was parsed = True
-            LOG_PARSER.debug("message was parsed, hashed and stored...")
+            LOG_PARSER.debug("message was parsed, hashed and data stored...")
             return True
 # if checksum was not stored then message was not parsed = False and update file
         else:
             with open(hash_file, "a") as chksum_file:
                 LOG_PARSER.debug("hash file updated...")
-                chksum_file.write(encrypted + "\n")
+                chksum_file.write(hash_sign + " " + encrypted + "\n")
                 return False
-# if file with checksums not exist then create it
+# if file with checksums does not exist then create new
     else:
-        with open(hash_file, "a") as chksum_file:
+        with open(hash_file, "w") as chksum_file:
             LOG_PARSER.debug("hash file does not exist, created...")
-            chksum_file.write(encrypted + "\n")
+            chksum_file.write(hash_sign + " " + encrypted + "\n")
             return False
 
 
-def msg_from_file(file_name, o_file, o_format, hash_file):
+def msg_from_file(file_name, o_file, o_format, hash_file, hash_sign):
     """
     parsing file as MSG, find emails and urls in fields and log
     : param file_name: input filename/folder (string)
     : param o_file: output filename (string)
     : param o_format: output format: "JSON" | "PKL"
+    : param hash_file: checksum file name (string)
+    : param hash_sign: checksum counts as FILE|BODY (string)
     """
+# check if message was parsed
+    if is_msg_parsed(file_name, hash_file, hash_sign):
+        return
 # checking MSG content and creating dictionary
     with open(file_name, "r") as file_to_read:
-# check if loaded message was parsed
-        if not is_msg_parsed(file_to_read.read(), hash_file):
-# parsing it as MSG if it new
-            file_to_read.seek(0, 0)
-            message = email.message_from_file(file_to_read)
-# if it was parsed then None message
-        else:
-            message = None
-    if message:
+        message = email.message_from_file(file_to_read)
 # parsing content of message
-        dct = parse_msg(message)
+    dct = parse_msg(message)
 # create lists of emails&urls from current dictionary
-        email_list, url_list = lst_from_dct(dct)
+    email_list, url_list = lst_from_dct(dct)
 # create current/new dictionary of emails&urls
-        d_curr = email_url_dct(dct, email_list, url_list)
+    d_curr = email_url_dct(dct, email_list, url_list)
 # update current/new dictionary from file
-        d_curr = dct_merge(d_curr, parse_file(o_file))
+    d_curr = dct_merge(d_curr, parse_file(o_file))
 #    print "current:", d_curr
 # save output if current parsed MSG is not empty
-        if d_curr != {}:
-            save_out(d_curr, o_file, o_format)
+    if d_curr != {}:
+        save_out(d_curr, o_file, o_format)
+    return
 # end of functions
 
 
@@ -525,9 +546,10 @@ def main():
                                                 "type": "",
                                                 "logfile": "",
                                                 "verbose": "",
-                                                "hashfile": ""})
+                                                "hasfile": "",
+                                                "hashsign": ""})
 # if config INI is set just read actual options from INI
-        if options.cfg:
+        if os.path.isfile(options.cfg):
             config.read(options.cfg)
             filename = config.get("msg","filename")
             output =  config.get("msg","output")
@@ -535,8 +557,15 @@ def main():
             logfile = config.get("msg","logfile")
             verbose = config.get("msg","verbose")
             hashfile = config.get("msg","hashfile")
+            hashsign = config.get("msg","hashsign")
+            if not (filename and output and savetype and logfile and 
+                    verbose and hashfile and hashsign):
+                mailparser.print_help()
+                print "wrong format or data in CONFIGFILE..."
+                sys.exit(1)
         else:
             mailparser.print_help()
+            print "CONFIGFILE must exist..."
             sys.exit(1)
 # set logging stream direction
         set_log_stream(logfile)
@@ -558,13 +587,15 @@ def main():
                         msg_from_file(os.path.join(filename, file_name),
                                       output,
                                       savetype,
-                                      hashfile)
+                                      hashfile,
+                                      hashsign)
 # call the function for particular file
             elif os.path.isfile(filename):
                 msg_from_file(filename,
                               output,
                               savetype,
-                              hashfile)
+                              hashfile,
+                              hashsign)
             else:
                 LOG_PARSER.error("file does not exist...")
                 sys.exit(1)
