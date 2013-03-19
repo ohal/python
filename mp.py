@@ -4,9 +4,12 @@
 # ohal@softserevinc.com
 #
 """
-MSG parser
-: param: input filename MSG
-: return: output to file, example -
+MSG parser - parse email message, found emails and urls
+: param: input configuration file name
+: return: save output to file serialize as JSON/PKL, 
+          log to console/syslog/file,
+          save hash of parsed messages and serialize to JSON
+example -
 ostas@softservecom.com         From
 ober@softservecom.com          To
 http://www.google.com          Body
@@ -28,13 +31,14 @@ import ConfigParser
 import json
 import pickle
 import hashlib
-
+import urllib2
+import subprocess
 
 # constants
-RE_EMAIL = "[\w\.=-]+@(?:[\w-]+\.)+[a-z]{2,4}"
+RE_EMAIL = u"[\w\.=-]+@(?:[\w-]+\.)+[a-z]{2,4}"
 #RE_EMAIL = '[\w\.=-]+@([a-z0-9-]+)(\.)([a-z]{2,4})(\.?)([a-z]{0,4})'
 #RE_EMAIL = '[\w\.=-]+@[\w\.-]+\.[\w]{2,3}'
-RE_URL = "https?:\/\/[^ \n\r\"<>]+"
+RE_URL = u"https?:\/\/[^ \n\r\"<>]+"
 #[^\"<>]+"
 #(?=[\s\.,$])' <- look-ahead
 
@@ -88,7 +92,7 @@ def email_addr_count(inp):
     []
 
     """
-    return sorted(list(re.findall(RE_EMAIL, inp)))
+    return sorted(list(re.findall(RE_EMAIL, inp, re.UNICODE)))
 
 
 def url_addr_count(inp):
@@ -119,7 +123,7 @@ def url_addr_count(inp):
     []
 
     """
-    return sorted(list(re.findall(RE_URL, inp)))
+    return sorted(list(re.findall(RE_URL, inp, re.UNICODE)))
 
 
 def lst_from_dct(dct):
@@ -166,13 +170,14 @@ def lst_from_dct(dct):
     return (email_list, url_list)
 
 
-def email_url_dct(dct, email_list, url_list):
+def email_url_dct(dct, email_list, url_list, fetch_url):
     """
     parsing dictionary, list of emails and urls and create dictionary
     of emails&urls without duplicates and counts it in each field
     : param dct: input dictionary (dict)
     : param email_list: list of emails (list)
     : param url_list: list of urls (list)
+    : param fetch_url: method of fetching content from web URL|SUB (str)
     : return e_u_dct: dictionary of emails&urls (dict)
     """
 # create dictionary of emails&urls
@@ -189,7 +194,9 @@ def email_url_dct(dct, email_list, url_list):
         e_u_dct[email_key] = d_entry
 # create entries for urls without duplicates
     for url_key in set(url_list):
-        e_u_dct[url_key] = dct["bodyurls"].count(url_key)
+        e_u_dct[url_key] = get_http(url_key, fetch_url)
+#        print fetch_url, "-", e_u_dct[url_key]
+#        e_u_dct[url_key] = dct["bodyurls"].count(url_key)
     return e_u_dct
 
 
@@ -291,7 +298,7 @@ def parse_msg(message):
     log warnings if message does not have fields FROM, TO or BODY of message
     log error if message does not have FROM&TO
     fields both and return empty dictionary
-    : param message: message (string)
+    : param message: message object structure (instance)
     : return dct: dictionary with parsed fields and it's content (dict)
     """
 # defaults
@@ -343,6 +350,66 @@ def parse_msg(message):
     return dct
 
 
+def get_http(http, fetch_url):
+    """
+    using urllib2 or subprocess
+    to get the content from web and
+    count emails & urls in it, fill dictionary as next -
+        if web is up {"reachable": True,
+                      "emails": amount of emails in body of message,
+                      "urls": amount of urls in body of message}
+        if web is down {"reachable": False}
+    : param http: url (str)
+    : param fetch_url: method of fetching content from web URL|SUB (str)
+    : return {}: dictionary element according template (dict)
+    """
+# get using urllib2
+    if fetch_url == "URL":
+#        print "URL", http,
+# try to get content from web and decode it
+        try:
+            data = urllib2.urlopen(http).read()
+            #.decode("utf-8", "replace")
+# is not reachable if did not get content
+        except:
+            LOG_PARSER.warning("*HTTP* is not reachable...")
+#            print sys.exc_info()
+            return {"reachable": False}
+# get using subprocess
+    elif fetch_url == "SUB":
+#        print "SUB", http,
+# try to get content from web
+        p_wget = subprocess.Popen("wget '%s' -qO- \
+                            --no-check-certificate \
+                            --tries=3 \
+                            --timeout=15 \
+                            --no-cache \
+                            --delete-after \
+                            --user-agent=Mozilla/4.0 \
+                            \(compatible\
+                            \; MSIE 5.5\; Windows NT\)" %(http,),
+                             shell = True,
+                             stdout = subprocess.PIPE,
+                             stderr = subprocess.STDOUT)
+        (data, err) = p_wget.communicate()
+# if did not return content and exit code not 0
+        if not data:
+            LOG_PARSER.warning("*HTTP* is not reachable...")
+            return {"reachable": False}
+# fetching method must be a URL or SUB
+    else:
+        LOG_PARSER.error("*CFG* fetching method must be URL or SUB...")
+        sys.exit(1)
+# parse content for emails&urls
+    data = unicode(data, "utf-8", "ignore")
+#    with open("html.%s" %(fetch_url,), "wb") as f:
+#        f.write(data.encode("utf-8", "ignore"))
+    LOG_PARSER.debug("*HTTP* got data...")
+    return {"reachable": True,
+            "emails": len(email_addr_count(data)),
+            "urls": len(url_addr_count(data))}
+
+
 def dct_merge(d_curr, d_prev):
     """
     merging two dictionaries of emails&urls and updating input dictionary
@@ -352,23 +419,37 @@ def dct_merge(d_curr, d_prev):
     """
 # updating previous/old dictionary from current/new
     for key in d_curr.keys():
-# check if url
-        if "://" in key:
-# add current/new value to previous/old dictionary and update matched urls
-            d_prev[key] = d_prev.get(key, 0) + d_curr[key]
-# if not url then email
+# if current/new matched previous/old element and not url = email
+        if (key in d_prev.keys()) and ("://" not in key):
+            for key_email in d_curr[key].keys():
+                d_prev[key][key_email] = d_prev[key].get(key_email, 0) + \
+                                         d_curr[key][key_email]
+# update old dictionary by new value
         else:
-# check if current/new email matched previous/old email
-            if key in d_prev.keys():
-# for matched new/old emails
-                for key_email in d_curr[key].keys():
-# update old email values by new email values
-                    d_prev[key][key_email] = d_prev[key].get(key_email, 0) \
-                                             + d_curr[key][key_email]
-# update old dictionary by new email
-            else:
-                d_prev[key] = d_curr[key]
+            d_prev[key] = d_curr[key]
     return d_prev
+
+
+# updating previous/old dictionary from current/new
+#    for key in d_curr.keys():
+# check if url
+#        if "://" in key:
+# add current/new value to previous/old dictionary and update matched urls
+#            d_prev[key] = d_curr[key]
+#            d_prev[key] = d_prev.get(key, 0) + d_curr[key]
+# if not url then email
+#        else:
+# check if current/new email matched previous/old email
+#            if key in d_prev.keys():
+# for matched new/old emails
+#                for key_email in d_curr[key].keys():
+# update old email values by new email values
+#                    d_prev[key][key_email] = d_prev[key].get(key_email, 0) \
+#                                             + d_curr[key][key_email]
+# update old dictionary by new email
+#            else:
+#                d_prev[key] = d_curr[key]
+#    return d_prev
 
 
 def save_out(d_curr, o_file, o_format):
@@ -387,7 +468,7 @@ def save_out(d_curr, o_file, o_format):
         to_file = pickle.dumps(d_curr)
 # file type must be a JSON/pickle
     else:
-        LOG_PARSER.error("file type must be a JSON or PKL...")
+        LOG_PARSER.error("*CFG* file type must be a JSON or PKL...")
         sys.exit(1)
 # write output data to file
     with open(o_file, "w") as file_out:
@@ -428,7 +509,7 @@ def get_body(msg):
 
 def is_msg_parsed(hash_data, hash_sign):
     """
-    count message checksum and compare it checksum
+    count message checksum and compare it
     with current dictionary that contains checksums of
     previously parsed messages depending on hash sign
     : param hash_data: data to count hash (string)
@@ -454,7 +535,7 @@ def is_msg_parsed(hash_data, hash_sign):
 def read_hash(hash_file):
     """
     read checksums file in JSON format and return current dictionary
-    if file does not exist return empty dictionary {}
+    if file does not exist or corrupted return empty dictionary {}
     : param hash_file: output filename (string)
     : return hash_data: dictionary of hashes (dct)
     """
@@ -463,15 +544,16 @@ def read_hash(hash_file):
         with open(hash_file, "r") as chksum_file:
             hash_data = json.loads(chksum_file.read())
         LOG_PARSER.debug("*HASH* read the hash data...")
-# check if the hash data is correct dictionary
+# check if the hash data is dictionary
         if type(hash_data) == dict:
             LOG_PARSER.debug("*HASH* file parsed as valid JSON...")
-# return hash data from file as valid dictionary
+# only return hash data from file as valid dictionary
             return hash_data
-# return empty dictionary if file is not a valid JSON or not exist
     except:
-        LOG_PARSER.warning("*HASH* file is corrupted or does not exist...")
-        return {}
+        pass
+# return empty dictionary if file is not a valid JSON or corrupted
+    LOG_PARSER.warning("*HASH* file does not exist or corrupted...")
+    return {}
 
 
 def save_hash(hash_file):
@@ -494,7 +576,7 @@ def save_hash(hash_file):
     return
 
 
-def msg_from_file(file_name, o_file, o_format, hash_sign):
+def msg_from_file(file_name, o_file, o_format, hash_sign, fetch_url):
     """
     parsing file as MSG, find emails and urls in fields and log
     check if message valid or not, parsed or not
@@ -502,6 +584,7 @@ def msg_from_file(file_name, o_file, o_format, hash_sign):
     : param o_file: output filename (string)
     : param o_format: output format: "JSON" | "PKL"
     : param hash_sign: checksum counts as FILE|BODY (string)
+    : param fetch_url: method of fetching content from web URL|SUB (str)
     """
 # get the data from file
     with open(file_name, "r") as file_to_read:
@@ -530,7 +613,7 @@ def msg_from_file(file_name, o_file, o_format, hash_sign):
 # create lists of emails&urls from current dictionary
     email_list, url_list = lst_from_dct(dct)
 # create current/new dictionary of emails&urls
-    d_curr = email_url_dct(dct, email_list, url_list)
+    d_curr = email_url_dct(dct, email_list, url_list, fetch_url)
 # update current/new dictionary from file
     d_curr = dct_merge(d_curr, parse_file(o_file))
 # save output if current parsed MSG is not empty
@@ -556,7 +639,7 @@ def main():
     mailparser.add_option("-c", "--config", dest="cfg", default="default.cfg",
                           help="read from CONFIGFILE")
     try:
-        options, args = mailparser.parse_args()
+        (options, args) = mailparser.parse_args()
 # set options from INI file if exist, all options will be overriden
         config = ConfigParser.SafeConfigParser({"filename": "",
                                                 "output": "",
@@ -564,19 +647,29 @@ def main():
                                                 "logfile": "",
                                                 "verbose": "",
                                                 "hasfile": "",
-                                                "hashsign": ""})
+                                                "hashsign": "",
+                                                "fetchurl": ""})
 # if config INI is set just read actual options from INI
         if os.path.isfile(options.cfg):
             config.read(options.cfg)
+# filename: configuration file name
             filename = config.get("msg","filename")
+# output: output file name
             output =  config.get("msg","output")
+# savetype: output format JSON|PKL
             savetype = config.get("msg","type")
+# logfile: file name for log messages
             logfile = config.get("msg","logfile")
+# verbose: verbose level for log messages
             verbose = config.get("msg","verbose")
+# hashfile: file name for hashes of messages
             hashfile = config.get("msg","hashfile")
+# hashsign: count hash of message by file or body only FILE|BODY
             hashsign = config.get("msg","hashsign")
+# fetchurl: method of fetching content from web URL|SUB (str)
+            fetchurl = config.get("msg","fetchurl")
             if not (filename and output and savetype and logfile and
-                    verbose and hashfile and hashsign):
+                    verbose and hashfile and hashsign and fetchurl):
                 mailparser.print_help()
                 print "wrong format or data in CONFIGFILE..."
                 sys.exit(1)
@@ -602,20 +695,22 @@ def main():
                         msg_from_file(os.path.join(filename, file_name),
                                       output,
                                       savetype,
-                                      hashsign)
+                                      hashsign,
+                                      fetchurl)
 # call the function for particular file
             elif os.path.isfile(filename):
                 msg_from_file(filename,
                               output,
                               savetype,
-                              hashsign)
+                              hashsign,
+                              fetchurl)
             else:
-                LOG_PARSER.error("file does not exist...")
+                LOG_PARSER.error("*CFG* file does not exist...")
                 sys.exit(1)
 # input file must be set
         else:
             mailparser.print_help()
-            LOG_PARSER.error("FILENAME must be set...")
+            LOG_PARSER.error("*CFG* FILENAME must be set...")
             sys.exit(1)
 # put current hash dictionary to file
         save_hash(hashfile)
