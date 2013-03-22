@@ -1,0 +1,24 @@
+USE parserdb
+
+DROP TABLE IF EXISTS hashes, emailes, urls;
+
+CREATE TABLE IF NOT EXISTS hashes
+    (Id INT PRIMARY KEY AUTO_INCREMENT, 
+    hash CHAR(32),
+    sign CHAR(4));
+
+CREATE TABLE IF NOT EXISTS emailes
+    (Id INT PRIMARY KEY AUTO_INCREMENT, 
+    email VARCHAR(255),
+    ffrom INT UNSIGNED,
+    fto INT UNSIGNED,
+    fcc INT UNSIGNED,
+    fbcc INT UNSIGNED,
+    fbody INT UNSIGNED);
+
+CREATE TABLE IF NOT EXISTS urls
+    (Id INT PRIMARY KEY AUTO_INCREMENT, 
+    url VARCHAR(255),
+    reach BIT,
+    cemails INT UNSIGNED,
+    curls INT UNSIGNED);
