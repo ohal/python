@@ -19,6 +19,8 @@ Total URLs          1
 """
 
 
+
+
 # import modules
 import optparse
 import os
@@ -26,13 +28,15 @@ import sys
 import email
 import re
 import logging
-import logging.handlers
 import ConfigParser
 import json
 import pickle
 import hashlib
 import urllib2
 import subprocess
+# import submodules
+import dbmp
+import logmp
 
 # constants
 RE_EMAIL = u"[\w\.=-]+@(?:[\w-]+\.)+[a-z]{2,4}"
@@ -43,13 +47,9 @@ RE_URL = u"https?:\/\/[^ \n\r\"<>]+"
 #(?=[\s\.,$])' <- look-ahead
 
 
-# defaults
-LOG_PARSER = logging.getLogger(__name__)
-
-
-# global dictionary of hashes
-hash_dct = {}
-
+# global defaults
+parser_logger = logging.getLogger("root")
+parser_db = None
 
 #functions
 def email_addr_count(inp):
@@ -139,22 +139,22 @@ def lst_from_dct(dct):
     for k in ("from", "to", "cc", "bcc", "bodyemails"):
         if dct.get(k):
 # log emails parsing
-            LOG_PARSER.debug("%s " % ", ".join(set(dct[k])) +
+            parser_logger.debug("%s " % ", ".join(set(dct[k])) +
                              "%s" % k.upper())
 # add each email to list
             email_list.extend(dct[k])
 # collect the urls and create the list of urls
     if dct.get("bodyurls"):
 # log urls parsing
-        LOG_PARSER.debug("%s " % ", ".join(set(dct["bodyurls"])) +
+        parser_logger.debug("%s " % ", ".join(set(dct["bodyurls"])) +
                          "%s" % "bodyurls".upper())
 # create the list of urls
         url_list = list(dct["bodyurls"])
 # log the statistic
-    LOG_PARSER.debug("---")
-    LOG_PARSER.debug("Total e-mail addresses %s" % \
+    parser_logger.debug("---")
+    parser_logger.debug("Total e-mail addresses %s" % \
                      len(set(email_list)))
-    LOG_PARSER.debug("Total URLs %s" % \
+    parser_logger.debug("Total URLs %s" % \
                      len(set(url_list)))
 # save all results to mp.rpt
 #    with open("mp.rpt", "w") as file_to_out:
@@ -200,54 +200,6 @@ def email_url_dct(dct, email_list, url_list, fetch_url):
     return e_u_dct
 
 
-def set_log_stream(log_dir):
-    """
-    set the direction/handler of logging - console, syslog or file name
-    : param log_dir: direction console|syslog|file name (string)
-    """
-# logging depends on console, syslog or file output
-    formatter = logging.Formatter("%(asctime)s %(levelname)s:%(filename)s:"
-                                  "%(module)s.%(funcName)s:"
-                                  "%(lineno)d - %(message)s",
-                                  "%d/%m/%Y %H:%M:%S")
-# if console output then handler is sys.stderr
-    if log_dir == "console":
-        hdlr = logging.StreamHandler(sys.stderr)
-# if syslog output then handler is /dev/syslog
-    elif log_dir == "syslog":
-        formatter = logging.Formatter("%(levelname)s:%(filename)s:"
-                                      "%(module)s.%(funcName)s:"
-                                      "%(lineno)d - %(message)s")
-        hdlr = logging.handlers.SysLogHandler(address="/dev/log")
-# if file output then handler is file
-    elif log_dir:
-        hdlr = logging.FileHandler(log_dir)
-    else:
-        print "log to console|syslog|file must be set..."
-        sys.exit(1)
-    hdlr.setFormatter(formatter)
-    LOG_PARSER.addHandler(hdlr)
-
-
-def set_verb(verb):
-    """
-    set verbosity level
-    : param verb: level (string)
-    """
-# logging depends on verbosity level
-    if verb == "0":
-        LOG_PARSER.setLevel(logging.CRITICAL)
-    elif verb == "1":
-        LOG_PARSER.setLevel(logging.ERROR)
-    elif verb == "2":
-        LOG_PARSER.setLevel(logging.INFO)
-    elif verb == "3":
-        LOG_PARSER.setLevel(logging.DEBUG)
-    else:
-        LOG_PARSER.error("verbose level must be 0, 1, 2 or 3...")
-        sys.exit(1)
-
-
 def parse_file(path):
     """
     determine file type, parse it and return valid JSON/PKL dictionary
@@ -266,7 +218,7 @@ def parse_file(path):
             load_data = file_input.read()
     except IOError:
 # warning if file does not exist
-        LOG_PARSER.debug("output file does not exist...")
+        parser_logger.debug("output file does not exist...")
 # return empty dictionary if file does not exist
         return {}
 # try to parse as JSON/PKL dictionary
@@ -276,18 +228,18 @@ def parse_file(path):
             parsed_data = formats[frmt](load_data)
 # check if parsed data is dictionary
             if type(parsed_data) == dict:
-                LOG_PARSER.debug("output file parsed as valid JSON/PKL...")
+                parser_logger.debug("output file parsed as valid JSON/PKL...")
 # return parsed data from file as valid JSON/PKL dictionary
                 return parsed_data
             else:
 # return empty dictionary if it is not valid = not a dictionary
-                LOG_PARSER.warning("output file is not valid JSON/PKL...")
+                parser_logger.warning("output file is not valid JSON/PKL...")
                 return {}
         except:
 # do nothing, try next iteration and next format
             pass
 # warning if loaded data not parsed as defined JSON/PKL
-    LOG_PARSER.warning("output file is not JSON/PKL or corrupted...")
+    parser_logger.warning("output file is not JSON/PKL or corrupted...")
 # return empty dictionary if loaded data not JSON/PKL or corrupted
     return {}
 
@@ -309,22 +261,22 @@ def parse_msg(message):
         dct["from"] = email_addr_count(message["from"])
 # warning if it does not have valid emails
         if len(dct.get("from", [])) == 0:
-            LOG_PARSER.warning("MSG does not have valid email"
+            parser_logger.warning("MSG does not have valid email"
                                " address *FROM*")
 # warning if it does not have field FROM
     else:
-        LOG_PARSER.warning("MSG does not contain field *FROM*")
+        parser_logger.warning("MSG does not contain field *FROM*")
 # try to get TO field
     if message.get("to"):
 # create dictionary entry as list of valid emails
         dct["to"] = email_addr_count(message["to"])
 # warning if it does not have valid emails
         if len(dct.get("to", [])) == 0:
-            LOG_PARSER.warning("MSG does not have valid email"
+            parser_logger.warning("MSG does not have valid email"
                                    " address *TO*")
 # warning if it does not have field TO
     else:
-        LOG_PARSER.warning("MSG does not contain field *TO*")
+        parser_logger.warning("MSG does not contain field *TO*")
 # try to get CC field and create dictionary entry
     if message.get("cc"):
         dct["cc"] = email_addr_count(message["cc"])
@@ -342,11 +294,11 @@ def parse_msg(message):
         if len(dct.get("bodyemails",
                        [])) == 0 and len(dct.get("bodyurls",
                        [])) == 0:
-            LOG_PARSER.warning("MSG does not contain any"
+            parser_logger.warning("MSG does not contain any"
                                " url or email address in *BODY*")
 # warning if message does not have BODY
     else:
-        LOG_PARSER.warning("MSG does not contain field *BODY*")
+        parser_logger.warning("MSG does not contain field *BODY*")
     return dct
 
 
@@ -365,19 +317,17 @@ def get_http(http, fetch_url):
     """
 # get using urllib2
     if fetch_url == "URL":
-#        print "URL", http,
 # try to get content from web and decode it
         try:
             data = urllib2.urlopen(http).read()
             #.decode("utf-8", "replace")
 # is not reachable if did not get content
         except:
-            LOG_PARSER.warning("*HTTP* is not reachable...")
+            parser_logger.warning("*HTTP* is not reachable...")
 #            print sys.exc_info()
             return {"reachable": False}
 # get using subprocess
     elif fetch_url == "SUB":
-#        print "SUB", http,
 # try to get content from web
         p_wget = subprocess.Popen("wget '%s' -qO- \
                             --no-check-certificate \
@@ -394,17 +344,15 @@ def get_http(http, fetch_url):
         (data, err) = p_wget.communicate()
 # if did not return content and exit code not 0
         if not data:
-            LOG_PARSER.warning("*HTTP* is not reachable...")
+            parser_logger.warning("*HTTP* is not reachable...")
             return {"reachable": False}
 # fetching method must be a URL or SUB
     else:
-        LOG_PARSER.error("*CFG* fetching method must be URL or SUB...")
+        parser_logger.error("*CFG* fetching method must be URL or SUB...")
         sys.exit(1)
 # parse content for emails&urls
     data = unicode(data, "utf-8", "ignore")
-#    with open("html.%s" %(fetch_url,), "wb") as f:
-#        f.write(data.encode("utf-8", "ignore"))
-    LOG_PARSER.debug("*HTTP* got data...")
+    parser_logger.debug("*HTTP* got data...")
     return {"reachable": True,
             "emails": len(email_addr_count(data)),
             "urls": len(url_addr_count(data))}
@@ -430,28 +378,6 @@ def dct_merge(d_curr, d_prev):
     return d_prev
 
 
-# updating previous/old dictionary from current/new
-#    for key in d_curr.keys():
-# check if url
-#        if "://" in key:
-# add current/new value to previous/old dictionary and update matched urls
-#            d_prev[key] = d_curr[key]
-#            d_prev[key] = d_prev.get(key, 0) + d_curr[key]
-# if not url then email
-#        else:
-# check if current/new email matched previous/old email
-#            if key in d_prev.keys():
-# for matched new/old emails
-#                for key_email in d_curr[key].keys():
-# update old email values by new email values
-#                    d_prev[key][key_email] = d_prev[key].get(key_email, 0) \
-#                                             + d_curr[key][key_email]
-# update old dictionary by new email
-#            else:
-#                d_prev[key] = d_curr[key]
-#    return d_prev
-
-
 def save_out(d_curr, o_file, o_format):
     """
     save results to output file in JSON|PKL format
@@ -461,18 +387,18 @@ def save_out(d_curr, o_file, o_format):
     """
 # create output data as JSON/PKL
     if o_format == "JSON":
-        LOG_PARSER.debug("create JSON file...")
+        parser_logger.debug("create JSON file...")
         to_file = json.dumps(d_curr)
     elif o_format == "PKL":
-        LOG_PARSER.debug("create PKL file...")
+        parser_logger.debug("create PKL file...")
         to_file = pickle.dumps(d_curr)
 # file type must be a JSON/pickle
     else:
-        LOG_PARSER.error("*CFG* file type must be a JSON or PKL...")
+        parser_logger.error("*CFG* file type must be a JSON or PKL...")
         sys.exit(1)
 # write output data to file
     with open(o_file, "w") as file_out:
-        LOG_PARSER.debug("write output file...")
+        parser_logger.debug("write output file...")
         file_out.write(to_file)
 
 
@@ -487,7 +413,7 @@ def get_body(msg):
     body_parts = []
 # if message multipart
     if msg.is_multipart():
-        LOG_PARSER.debug("MSG has *MULTIPART* body")
+        parser_logger.debug("MSG has *MULTIPART* body")
 # for each part of message body
         for part in msg.walk():
             charset = part.get_content_charset()
@@ -518,62 +444,18 @@ def is_msg_parsed(hash_data, hash_sign):
     """
 # get checksum of hash data
     encrypted = hashlib.md5(hash_data).hexdigest()
-# check if checksum stored in global hash dictionary with particular hash sign
-    if hash_dct.get(hash_sign, {}).get(encrypted):
-        LOG_PARSER.debug("*HASH* message was parsed...")
+# check if checksum stored in database with particular hash sign
+    if parser_db.hash_check(encrypted, hash_sign):
+        parser_logger.debug("%s - %s - message was parsed..." % (encrypted, hash_sign))
 # message was parsed = True and return old dictionary
         return True
 # if checksum is not in hash dictionary
     else:
-# updating global hash dictionary with hash of new message
-        hash_dct.setdefault(hash_sign, {})[encrypted] = 1
+# updating database with particular hash and hash sign
+        parser_db.hash_save(encrypted, hash_sign)
 # message was not parsed = False and return updated dictionary
-        LOG_PARSER.debug("*HASH* dictionary was updated...")
+        parser_logger.debug("%s - %s - new hash, database was updated..." % (encrypted, hash_sign))
         return False
-
-
-def read_hash(hash_file):
-    """
-    read checksums file in JSON format and return current dictionary
-    if file does not exist or corrupted return empty dictionary {}
-    : param hash_file: output filename (string)
-    : return hash_data: dictionary of hashes (dct)
-    """
-# try to read file with checksums if it exists
-    try:
-        with open(hash_file, "r") as chksum_file:
-            hash_data = json.loads(chksum_file.read())
-        LOG_PARSER.debug("*HASH* read the hash data...")
-# check if the hash data is dictionary
-        if type(hash_data) == dict:
-            LOG_PARSER.debug("*HASH* file parsed as valid JSON...")
-# only return hash data from file as valid dictionary
-            return hash_data
-    except:
-        pass
-# return empty dictionary if file is not a valid JSON or corrupted
-    LOG_PARSER.warning("*HASH* file does not exist or corrupted...")
-    return {}
-
-
-def save_hash(hash_file):
-    """
-    save results to output checksums file in JSON format
-    : param hash_file: output filename (string)
-    """
-# check if file with checksums exist
-    if not os.path.isfile(hash_file):
-        LOG_PARSER.debug("*HASH* file does not exist...")
-# write output data to file if not empty
-    if hash_dct != {}:
-# save output data as JSON/PKL
-        LOG_PARSER.debug("*HASH* save the hash file as JSON...")
-        with open(hash_file, "w") as file_out:
-            file_out.write(json.dumps(hash_dct))
-# log if hash is empty
-    else:
-        LOG_PARSER.debug("*HASH* nothing to save...")
-    return
 
 
 def msg_from_file(file_name, o_file, o_format, hash_sign, fetch_url):
@@ -593,7 +475,7 @@ def msg_from_file(file_name, o_file, o_format, hash_sign, fetch_url):
     message = email.message_from_string(load_data)
 # if data from file does not have fields FROM&TO then it does not valid message
     if (not message.get("from")) and (not message.get("to")):
-        LOG_PARSER.error("MSG is not a valid email message...")
+        parser_logger.error("%s - MSG is not a valid email message..." % (file_name,))
         return
 # get the hash data as string depending on FILE hash sign
     if hash_sign == "FILE":
@@ -603,23 +485,94 @@ def msg_from_file(file_name, o_file, o_format, hash_sign, fetch_url):
         hash_data = get_body(message)
 # must be set only a FILE/BODY
     else:
-        LOG_PARSER.error("*HASH* counts only a FILE/BODY checksum...")
+        parser_logger.error("*HASH* counts only a FILE/BODY checksum...")
         sys.exit(1)
 # check if message was parsed
-    if is_msg_parsed(hash_data, hash_sign):
-        return
+#    if is_msg_parsed(hash_data, hash_sign):
+#        return
 # parsing content of message
     dct = parse_msg(message)
 # create lists of emails&urls from current dictionary
     email_list, url_list = lst_from_dct(dct)
 # create current/new dictionary of emails&urls
     d_curr = email_url_dct(dct, email_list, url_list, fetch_url)
+    print d_curr
 # update current/new dictionary from file
     d_curr = dct_merge(d_curr, parse_file(o_file))
+    print d_curr
 # save output if current parsed MSG is not empty
     if d_curr != {}:
         save_out(d_curr, o_file, o_format)
     return
+
+
+def set_db_ini(dbcfg):
+    """
+    read and return database parameters from INI file
+    : param dbcfg: input filename/folder (string)
+    : return host, user, password, name: list of parameters (list)
+    """
+# set database options from INI file if exist, all options will be overriden
+    confdb = ConfigParser.SafeConfigParser({"host": "",
+                                             "user": "",
+                                             "password": "",
+                                             "dbname": ""})
+    if os.path.isfile(dbcfg):
+        confdb.read(dbcfg)
+        host = confdb.get("db","host")
+        user =  confdb.get("db","user")
+        password = confdb.get("db","password")
+        name = confdb.get("db","dbname")
+        if not (host and user and password and name):
+            print "wrong format or data in DATABASECONFIG..."
+            sys.exit(1)
+        return (host, user, password, name)
+    else:
+        print "DATABASECONFIG must exist..."
+        sys.exit(1)
+
+
+def set_mp_ini(cfg):
+    """
+    read and return mail parser parameters from INI file
+    : param cfg: input filename/folder (string)
+    : return filename, output, savetype, logfile,
+      verbose, hashsign, fetchurl: list of parameters (list)
+    """
+# set options from INI file if exist, all options will be overriden
+    config = ConfigParser.SafeConfigParser({"filename": "",
+                                            "output": "",
+                                            "type": "",
+                                            "logfile": "",
+                                            "verbose": "",
+                                            "hashsign": "",
+                                            "fetchurl": ""})
+# if config INI is set just read actual options from INI
+    if os.path.isfile(cfg):
+        config.read(cfg)
+# filename: configuration file name
+        filename = config.get("msg","filename")
+# output: output file name
+        output =  config.get("msg","output")
+# savetype: output format JSON|PKL
+        savetype = config.get("msg","type")
+# logfile: file name for log messages
+        logfile = config.get("msg","logfile")
+# verbose: verbose level for log messages
+        verbose = config.get("msg","verbose")
+# hashsign: count hash of message by file or body only FILE|BODY
+        hashsign = config.get("msg","hashsign")
+# fetchurl: method of fetching content from web URL|SUB (str)
+        fetchurl = config.get("msg","fetchurl")
+        if not (filename and output and savetype and logfile and
+                verbose and hashsign and fetchurl):
+            print "wrong format or data in CONFIGFILE..."
+            sys.exit(1)
+        return (filename, output, savetype, logfile,
+                verbose, hashsign, fetchurl)
+    else:
+        print "CONFIGFILE must exist..."
+        sys.exit(1)
 # end of functions
 
 
@@ -628,9 +581,11 @@ def main():
     main module
     """
 # globals
-    global hash_dct
+    global parser_logger
+    global parser_db
+#    global db_host, db_user, db_password, db_name
 # defaults
-    usage = "usage: %prog -c CONFIGFILE"
+    usage = "usage: %prog -c CONFIGFILE -d DATABASECONFIG"
 # parsing the CLI string for options and arguments
     mailparser = optparse.OptionParser(usage,
                 epilog = "MSG parser - "
@@ -638,51 +593,20 @@ def main():
                 "save result and log")
     mailparser.add_option("-c", "--config", dest="cfg", default="default.cfg",
                           help="read from CONFIGFILE")
+    mailparser.add_option("-d", "--dbcfg", dest="dbcfg", default="db.cfg",
+                          help="read from DATABASECONFIG")
     try:
         (options, args) = mailparser.parse_args()
-# set options from INI file if exist, all options will be overriden
-        config = ConfigParser.SafeConfigParser({"filename": "",
-                                                "output": "",
-                                                "type": "",
-                                                "logfile": "",
-                                                "verbose": "",
-                                                "hasfile": "",
-                                                "hashsign": "",
-                                                "fetchurl": ""})
-# if config INI is set just read actual options from INI
-        if os.path.isfile(options.cfg):
-            config.read(options.cfg)
-# filename: configuration file name
-            filename = config.get("msg","filename")
-# output: output file name
-            output =  config.get("msg","output")
-# savetype: output format JSON|PKL
-            savetype = config.get("msg","type")
-# logfile: file name for log messages
-            logfile = config.get("msg","logfile")
-# verbose: verbose level for log messages
-            verbose = config.get("msg","verbose")
-# hashfile: file name for hashes of messages
-            hashfile = config.get("msg","hashfile")
-# hashsign: count hash of message by file or body only FILE|BODY
-            hashsign = config.get("msg","hashsign")
-# fetchurl: method of fetching content from web URL|SUB (str)
-            fetchurl = config.get("msg","fetchurl")
-            if not (filename and output and savetype and logfile and
-                    verbose and hashfile and hashsign and fetchurl):
-                mailparser.print_help()
-                print "wrong format or data in CONFIGFILE..."
-                sys.exit(1)
-        else:
-            mailparser.print_help()
-            print "CONFIGFILE must exist..."
-            sys.exit(1)
-# set logging stream direction
-        set_log_stream(logfile)
-# set verbosity level
-        set_verb(verbose)
-# get hash dictionary from hash file and set global hash dictionary
-        hash_dct = read_hash(hashfile)
+# set mail parser from INI
+        (filename, output, savetype, logfile,
+         verbose, hashsign, fetchurl) = set_mp_ini(options.cfg)
+# set database from INI
+        (db_host, db_user, db_password, db_name) = set_db_ini(options.dbcfg)
+# set logging
+        parser_logger = logmp.set_mp_logger("root", logfile, verbose)
+# set database
+        parser_db = dbmp.ParserDB(db_host, db_user, db_password, db_name)
+#        print parser_db
 # parse directory/file
         if filename:
 # if directory
@@ -705,22 +629,20 @@ def main():
                               hashsign,
                               fetchurl)
             else:
-                LOG_PARSER.error("*CFG* file does not exist...")
+                parser_logger.error("*CFG* file does not exist...")
                 sys.exit(1)
 # input file must be set
         else:
             mailparser.print_help()
-            LOG_PARSER.error("*CFG* FILENAME must be set...")
+            parser_logger.error("*CFG* FILENAME must be set...")
             sys.exit(1)
-# put current hash dictionary to file
-        save_hash(hashfile)
 # if something went wrong in general get exception info for debugging
     except Exception:
 #        mailparser.print_help()
         print ("general exception...")
         print sys.exc_info()
-#        LOG_PARSER.error("general exception...")
-#        LOG_PARSER.error(sys.exc_info())
+#        parser_logger.error("general exception...")
+#        parser_logger.error(sys.exc_info())
         sys.exit(1)
 
 
