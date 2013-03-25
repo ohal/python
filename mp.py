@@ -378,6 +378,26 @@ def dct_merge(d_curr, d_prev):
     return d_prev
 
 
+def db_update(data):
+    """
+    merging two dictionaries of emails&urls and updating input dictionary
+    : param d_curr: current/new dictionary (dict)
+    : param d_prev: previous/old dictionary (dict)
+    : return d_prev: merged/updated dictionary (dict)
+    """
+# updating previous/old dictionary from current/new
+    for key in data.keys():
+#        print "iterator", key
+# if current/new matched previous/old element and not url = email
+        if "://" in key:
+            parser_db.url_update(key, data[key])
+#            print "url", key, "-", data[key]
+# update old dictionary by new value
+        else:
+            parser_db.email_update(key, data[key])
+#            print "email", key, "-", data[key]
+
+
 def save_out(d_curr, o_file, o_format):
     """
     save results to output file in JSON|PKL format
@@ -488,21 +508,23 @@ def msg_from_file(file_name, o_file, o_format, hash_sign, fetch_url):
         parser_logger.error("*HASH* counts only a FILE/BODY checksum...")
         sys.exit(1)
 # check if message was parsed
-#    if is_msg_parsed(hash_data, hash_sign):
-#        return
+    if is_msg_parsed(hash_data, hash_sign):
+        return
 # parsing content of message
     dct = parse_msg(message)
 # create lists of emails&urls from current dictionary
     email_list, url_list = lst_from_dct(dct)
 # create current/new dictionary of emails&urls
     d_curr = email_url_dct(dct, email_list, url_list, fetch_url)
-    print d_curr
+#    print d_curr
 # update current/new dictionary from file
-    d_curr = dct_merge(d_curr, parse_file(o_file))
-    print d_curr
+    db_update(d_curr)
+#    d_curr = dct_merge(d_curr, parse_file(o_file))
+#    print d_curr
 # save output if current parsed MSG is not empty
-    if d_curr != {}:
-        save_out(d_curr, o_file, o_format)
+#    if d_curr != {}:
+#        save_out(d_curr, o_file, o_format)
+#    parser_db.show()
     return
 
 
