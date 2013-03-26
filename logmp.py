@@ -42,7 +42,8 @@ def set_mp_logger(log_name, log_stream, log_level):
     elif log_stream:
         hdlr = logging.FileHandler(log_stream)
     else:
-        print "*CFG* log to console|syslog|file must be set..."
+        print ("*LOG* config error, only console|syslog|file, not: %s" %
+               (log_stream,))
         sys.exit(1)
 # set instance class logger with name
     mp_logger = logging.getLogger(log_name)
@@ -60,7 +61,8 @@ def set_mp_logger(log_name, log_stream, log_level):
     elif log_level == "3":
         mp_logger.setLevel(logging.DEBUG)
     else:
-        mp_logger.error("*CFG* verbose level must be 0, 1, 2 or 3...")
+        mp_logger.error("*LOG* verbose level must be 0|1|2|3, not: %s" %
+                        (log_level,))
         sys.exit(1)
 # return a logger with the specified name
     return mp_logger

@@ -29,8 +29,8 @@ import email
 import re
 import logging
 import ConfigParser
-import json
-import pickle
+#import json
+#import pickle
 import hashlib
 import urllib2
 import subprocess
@@ -178,7 +178,7 @@ def email_url_dct(dct, email_list, url_list, fetch_url):
     : param email_list: list of emails (list)
     : param url_list: list of urls (list)
     : param fetch_url: method of fetching content from web URL|SUB (str)
-    : return e_u_dct: dictionary of emails&urls (dict)
+    : return e_u_dct: dictionary of emails & urls (dict)
     """
 # create dictionary of emails&urls
     e_u_dct = {}
@@ -195,53 +195,8 @@ def email_url_dct(dct, email_list, url_list, fetch_url):
 # create entries for urls without duplicates
     for url_key in set(url_list):
         e_u_dct[url_key] = get_http(url_key, fetch_url)
-#        print fetch_url, "-", e_u_dct[url_key]
-#        e_u_dct[url_key] = dct["bodyurls"].count(url_key)
+# return actual dictionary
     return e_u_dct
-
-
-def parse_file(path):
-    """
-    determine file type, parse it and return valid JSON/PKL dictionary
-    or emty dictionary if file is corrupted
-    or not valid JSON/PKL or it does not exist
-    : param path: file name (string)
-    : return {}|parsed_data: parsed dictionary JSON/PKL (dict)
-    """
-# JSON/PKL formats definition
-    formats = {"json": lambda x: json.loads(x),
-               "pickle": lambda x: pickle.loads(x)}
-    try:
-# try to read file
-        with open(path, "r") as file_input:
-# load data from file as string
-            load_data = file_input.read()
-    except IOError:
-# warning if file does not exist
-        parser_logger.debug("output file does not exist...")
-# return empty dictionary if file does not exist
-        return {}
-# try to parse as JSON/PKL dictionary
-    for frmt in formats.keys():
-        try:
-# try to parse loaded data as valid JSON/PKL dictionary
-            parsed_data = formats[frmt](load_data)
-# check if parsed data is dictionary
-            if type(parsed_data) == dict:
-                parser_logger.debug("output file parsed as valid JSON/PKL...")
-# return parsed data from file as valid JSON/PKL dictionary
-                return parsed_data
-            else:
-# return empty dictionary if it is not valid = not a dictionary
-                parser_logger.warning("output file is not valid JSON/PKL...")
-                return {}
-        except:
-# do nothing, try next iteration and next format
-            pass
-# warning if loaded data not parsed as defined JSON/PKL
-    parser_logger.warning("output file is not JSON/PKL or corrupted...")
-# return empty dictionary if loaded data not JSON/PKL or corrupted
-    return {}
 
 
 def parse_msg(message):
@@ -312,7 +267,7 @@ def get_http(http, fetch_url):
                       "urls": amount of urls in body of message}
         if web is down {"reachable": False}
     : param http: url (str)
-    : param fetch_url: method of fetching content from web URL|SUB (str)
+    : param fetch_url: method of fetching content from web, URL|SUB (str)
     : return {}: dictionary element according template (dict)
     """
 # get using urllib2
@@ -348,7 +303,8 @@ def get_http(http, fetch_url):
             return {"reachable": False}
 # fetching method must be a URL or SUB
     else:
-        parser_logger.error("*CFG* fetching method must be URL or SUB...")
+        parser_logger.error("*HTTP* config error, only URL|SUB, not: %s" %
+                            (fetch_url,))
         sys.exit(1)
 # parse content for emails&urls
     data = unicode(data, "utf-8", "ignore")
@@ -358,68 +314,20 @@ def get_http(http, fetch_url):
             "urls": len(url_addr_count(data))}
 
 
-def dct_merge(d_curr, d_prev):
-    """
-    merging two dictionaries of emails&urls and updating input dictionary
-    : param d_curr: current/new dictionary (dict)
-    : param d_prev: previous/old dictionary (dict)
-    : return d_prev: merged/updated dictionary (dict)
-    """
-# updating previous/old dictionary from current/new
-    for key in d_curr.keys():
-# if current/new matched previous/old element and not url = email
-        if (key in d_prev.keys()) and ("://" not in key):
-            for key_email in d_curr[key].keys():
-                d_prev[key][key_email] = d_prev[key].get(key_email, 0) + \
-                                         d_curr[key][key_email]
-# update old dictionary by new value
-        else:
-            d_prev[key] = d_curr[key]
-    return d_prev
-
-
 def db_update(data):
     """
-    merging two dictionaries of emails&urls and updating input dictionary
-    : param d_curr: current/new dictionary (dict)
-    : param d_prev: previous/old dictionary (dict)
-    : return d_prev: merged/updated dictionary (dict)
+    update database with emails & urls
+    : param data: current/new dictionary (dict)
     """
 # updating previous/old dictionary from current/new
     for key in data.keys():
-#        print "iterator", key
 # if current/new matched previous/old element and not url = email
         if "://" in key:
             parser_db.url_update(key, data[key])
-#            print "url", key, "-", data[key]
 # update old dictionary by new value
         else:
             parser_db.email_update(key, data[key])
-#            print "email", key, "-", data[key]
-
-
-def save_out(d_curr, o_file, o_format):
-    """
-    save results to output file in JSON|PKL format
-    : param d_curr: current dictionary with updated content (dct)
-    : param o_file: output filename (string)
-    : param o_format: output format: "JSON" | "PKL"
-    """
-# create output data as JSON/PKL
-    if o_format == "JSON":
-        parser_logger.debug("create JSON file...")
-        to_file = json.dumps(d_curr)
-    elif o_format == "PKL":
-        parser_logger.debug("create PKL file...")
-        to_file = pickle.dumps(d_curr)
-# file type must be a JSON/pickle
-    else:
-        parser_logger.error("*CFG* file type must be a JSON or PKL...")
-        sys.exit(1)
-# write output data to file
-    with open(o_file, "w") as file_out:
-        parser_logger.debug("write output file...")
-        file_out.write(to_file)
+    return
 
 
 def get_body(msg):
@@ -478,13 +386,11 @@ def is_msg_parsed(hash_data, hash_sign):
         return False
 
 
-def msg_from_file(file_name, o_file, o_format, hash_sign, fetch_url):
+def msg_from_file(file_name, hash_sign, fetch_url):
     """
     parsing file as MSG, find emails and urls in fields and log
     check if message valid or not, parsed or not
     : param file_name: input filename/folder (string)
-    : param o_file: output filename (string)
-    : param o_format: output format: "JSON" | "PKL"
     : param hash_sign: checksum counts as FILE|BODY (string)
     : param fetch_url: method of fetching content from web URL|SUB (str)
     """
@@ -505,7 +411,8 @@ def msg_from_file(file_name, o_file, o_format, hash_sign, fetch_url):
         hash_data = get_body(message)
 # must be set only a FILE/BODY
     else:
-        parser_logger.error("*HASH* counts only a FILE/BODY checksum...")
+        parser_logger.error("*HASH* config error, only FILE|BODY, not: %s" %
+                            (hash_sign,))
         sys.exit(1)
 # check if message was parsed
     if is_msg_parsed(hash_data, hash_sign):
@@ -516,14 +423,8 @@ def msg_from_file(file_name, o_file, o_format, hash_sign, fetch_url):
     email_list, url_list = lst_from_dct(dct)
 # create current/new dictionary of emails&urls
     d_curr = email_url_dct(dct, email_list, url_list, fetch_url)
-#    print d_curr
-# update current/new dictionary from file
+# update database with actual data from parsed MSG
     db_update(d_curr)
-#    d_curr = dct_merge(d_curr, parse_file(o_file))
-#    print d_curr
-# save output if current parsed MSG is not empty
-#    if d_curr != {}:
-#        save_out(d_curr, o_file, o_format)
 #    parser_db.show()
     return
 
@@ -563,8 +464,6 @@ def set_mp_ini(cfg):
     """
 # set options from INI file if exist, all options will be overriden
     config = ConfigParser.SafeConfigParser({"filename": "",
-                                            "output": "",
-                                            "type": "",
                                             "logfile": "",
                                             "verbose": "",
                                             "hashsign": "",
@@ -574,10 +473,6 @@ def set_mp_ini(cfg):
         config.read(cfg)
 # filename: configuration file name
         filename = config.get("msg","filename")
-# output: output file name
-        output =  config.get("msg","output")
-# savetype: output format JSON|PKL
-        savetype = config.get("msg","type")
 # logfile: file name for log messages
         logfile = config.get("msg","logfile")
 # verbose: verbose level for log messages
@@ -586,11 +481,11 @@ def set_mp_ini(cfg):
         hashsign = config.get("msg","hashsign")
 # fetchurl: method of fetching content from web URL|SUB (str)
         fetchurl = config.get("msg","fetchurl")
-        if not (filename and output and savetype and logfile and
+        if not (filename and logfile and
                 verbose and hashsign and fetchurl):
             print "wrong format or data in CONFIGFILE..."
             sys.exit(1)
-        return (filename, output, savetype, logfile,
+        return (filename, logfile,
                 verbose, hashsign, fetchurl)
     else:
         print "CONFIGFILE must exist..."
@@ -605,7 +500,6 @@ def main():
 # globals
     global parser_logger
     global parser_db
-#    global db_host, db_user, db_password, db_name
 # defaults
     usage = "usage: %prog -c CONFIGFILE -d DATABASECONFIG"
 # parsing the CLI string for options and arguments
@@ -620,7 +514,7 @@ def main():
     try:
         (options, args) = mailparser.parse_args()
 # set mail parser from INI
-        (filename, output, savetype, logfile,
+        (filename, logfile,
          verbose, hashsign, fetchurl) = set_mp_ini(options.cfg)
 # set database from INI
         (db_host, db_user, db_password, db_name) = set_db_ini(options.dbcfg)
@@ -628,7 +522,6 @@ def main():
         parser_logger = logmp.set_mp_logger("root", logfile, verbose)
 # set database
         parser_db = dbmp.ParserDB(db_host, db_user, db_password, db_name)
-#        print parser_db
 # parse directory/file
         if filename:
 # if directory
@@ -639,15 +532,11 @@ def main():
                     if os.path.isfile(os.path.join(filename, file_name)):
 # call the function for each file
                         msg_from_file(os.path.join(filename, file_name),
-                                      output,
-                                      savetype,
                                       hashsign,
                                       fetchurl)
 # call the function for particular file
             elif os.path.isfile(filename):
                 msg_from_file(filename,
-                              output,
-                              savetype,
                               hashsign,
                               fetchurl)
             else:
