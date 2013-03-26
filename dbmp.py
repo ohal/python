@@ -39,8 +39,11 @@ class ParserDB(object):
             conn = mdb.connect(self.host,
                                self.user,
                                self.passwd,
-                               self.d_base)
+                               self.d_base,
+                               use_unicode=True)
+            conn.set_character_set("utf8")
             cur = conn.cursor()
+            cur.execute("SET NAMES utf8;")
 # try to get checksum if exist
             cur.execute("SELECT 1 "
                 "FROM hashes "
@@ -64,8 +67,12 @@ class ParserDB(object):
             conn = mdb.connect(self.host,
                                self.user,
                                self.passwd,
-                               self.d_base)
+                               self.d_base,
+                               use_unicode=True)
+            conn.set_character_set("utf8")
+# set cursor
             cur = conn.cursor()
+            cur.execute("SET NAMES utf8;")
 # update table hashes with new checksum and hash sign
             cur.execute("INSERT INTO hashes (hash, sign) "
                 "VALUES (%s, %s);",
@@ -86,9 +93,12 @@ class ParserDB(object):
             conn = mdb.connect(self.host,
                                self.user,
                                self.passwd,
-                               self.d_base)
+                               self.d_base,
+                               use_unicode=True)
+            conn.set_character_set("utf8")
 # set cursor
             cur = conn.cursor()
+            cur.execute("SET NAMES utf8;")
 # try to get url
             cur.execute("SELECT 1 "
                 "FROM urls "
@@ -131,9 +141,12 @@ class ParserDB(object):
             conn = mdb.connect(self.host,
                                self.user,
                                self.passwd,
-                               self.d_base)
+                               self.d_base,
+                               use_unicode=True)
+            conn.set_character_set("utf8")
 # set cursor
             cur = conn.cursor()
+            cur.execute("SET NAMES utf8;")
 # try to get email
             cur.execute("SELECT 1 "
                         "FROM emails "
@@ -187,8 +200,12 @@ class ParserDB(object):
             conn = mdb.connect(self.host,
                                self.user,
                                self.passwd,
-                               self.d_base)
+                               self.d_base,
+                               use_unicode=True)
+            conn.set_character_set("utf8")
+# set cursor
             cur = conn.cursor()
+            cur.execute("SET NAMES utf8;")
             cur.execute("SELECT * "
                         "FROM hashes;")
             print "HASHES"

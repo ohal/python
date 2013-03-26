@@ -321,6 +321,10 @@ def db_update(data):
     """
 # updating previous/old dictionary from current/new
     for key in data.keys():
+# validate record length up to 255 symbols
+        if len(key) > 256:
+            parser_logger.warning("*DB* key length truncated to 256 symbols...")
+            key = key[:256]
 # if current/new matched previous/old element and not url = email
         if "://" in key:
             parser_db.url_update(key, data[key])
