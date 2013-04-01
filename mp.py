@@ -29,8 +29,6 @@ import email
 import re
 import logging
 import ConfigParser
-#import json
-#import pickle
 import hashlib
 import urllib2
 import subprocess
@@ -48,7 +46,7 @@ RE_URL = u"https?:\/\/[^ \n\r\"<>]+"
 
 
 # global defaults
-parser_logger = logging.getLogger("root")
+parser_logger = logging.getLogger("mparser")
 parser_db = None
 
 #functions
@@ -376,9 +374,12 @@ def is_msg_parsed(hash_data, hash_sign):
     """
 # get checksum of hash data
     encrypted = hashlib.md5(hash_data).hexdigest()
+#    print encrypted
+#    parser_db.hash_print(encrypted, hash_sign)
 # check if checksum stored in database with particular hash sign
     if parser_db.hash_check(encrypted, hash_sign):
-        parser_logger.debug("%s - %s - message was parsed..." % (encrypted, hash_sign))
+        parser_logger.debug("%s - %s - message was parsed..." %
+                            (encrypted, hash_sign))
 # message was parsed = True and return old dictionary
         return True
 # if checksum is not in hash dictionary
@@ -386,7 +387,8 @@ def is_msg_parsed(hash_data, hash_sign):
 # updating database with particular hash and hash sign
         parser_db.hash_save(encrypted, hash_sign)
 # message was not parsed = False and return updated dictionary
-        parser_logger.debug("%s - %s - new hash, database was updated..." % (encrypted, hash_sign))
+        parser_logger.debug("%s - %s - new hash, database was updated..." %
+                            (encrypted, hash_sign))
         return False
 
 
@@ -420,7 +422,7 @@ def msg_from_file(file_name, hash_sign, fetch_url):
         sys.exit(1)
 # check if message was parsed
     if is_msg_parsed(hash_data, hash_sign):
-        return
+        return False
 # parsing content of message
     dct = parse_msg(message)
 # create lists of emails&urls from current dictionary
@@ -430,7 +432,7 @@ def msg_from_file(file_name, hash_sign, fetch_url):
 # update database with actual data from parsed MSG
     db_update(d_curr)
 #    parser_db.show()
-    return
+    return True
 
 
 def set_db_ini(dbcfg):
@@ -459,6 +461,19 @@ def set_db_ini(dbcfg):
         sys.exit(1)
 
 
+def show_db(showdb):
+    """
+    show data only from current database and exit
+    : param showdb: show database = 1 | not show = 0 (string)
+    """
+    if showdb == "1":
+        parser_db.db_show()
+        sys.exit(0)
+    elif showdb not in ("1", "0"):
+        parser_logger.error("*CFG* show DATABASE bad parameter...")
+        sys.exit(1)
+
+
 def set_mp_ini(cfg):
     """
     read and return mail parser parameters from INI file
@@ -468,8 +483,6 @@ def set_mp_ini(cfg):
     """
 # set options from INI file if exist, all options will be overriden
     config = ConfigParser.SafeConfigParser({"filename": "",
-                                            "logfile": "",
-                                            "verbose": "",
                                             "hashsign": "",
                                             "fetchurl": ""})
 # if config INI is set just read actual options from INI
@@ -477,20 +490,14 @@ def set_mp_ini(cfg):
         config.read(cfg)
 # filename: configuration file name
         filename = config.get("msg","filename")
-# logfile: file name for log messages
-        logfile = config.get("msg","logfile")
-# verbose: verbose level for log messages
-        verbose = config.get("msg","verbose")
 # hashsign: count hash of message by file or body only FILE|BODY
         hashsign = config.get("msg","hashsign")
 # fetchurl: method of fetching content from web URL|SUB (str)
         fetchurl = config.get("msg","fetchurl")
-        if not (filename and logfile and
-                verbose and hashsign and fetchurl):
+        if not (filename and hashsign and fetchurl):
             print "wrong format or data in CONFIGFILE..."
             sys.exit(1)
-        return (filename, logfile,
-                verbose, hashsign, fetchurl)
+        return (filename, hashsign, fetchurl)
     else:
         print "CONFIGFILE must exist..."
         sys.exit(1)
@@ -505,7 +512,7 @@ def main():
     global parser_logger
     global parser_db
 # defaults
-    usage = "usage: %prog -c CONFIGFILE -d DATABASECONFIG"
+    usage = "usage: %prog -c CONFIGFILE -d DATABASECONFIG -l LOGGINGCONFIG"
 # parsing the CLI string for options and arguments
     mailparser = optparse.OptionParser(usage,
                 epilog = "MSG parser - "
@@ -515,17 +522,23 @@ def main():
                           help="read from CONFIGFILE")
     mailparser.add_option("-d", "--dbcfg", dest="dbcfg", default="db.cfg",
                           help="read from DATABASECONFIG")
+    mailparser.add_option("-l", "--logcfg", dest="logcfg", default="log.cfg",
+                          help="read from LOGGINGCONFIG")
+    mailparser.add_option("-s", "--showdb", dest="showdb", default="0",
+                          help="show data from DATABASE")
     try:
         (options, args) = mailparser.parse_args()
+#        print "options", options
 # set mail parser from INI
-        (filename, logfile,
-         verbose, hashsign, fetchurl) = set_mp_ini(options.cfg)
+        (filename, hashsign, fetchurl) = set_mp_ini(options.cfg)
 # set database from INI
         (db_host, db_user, db_password, db_name) = set_db_ini(options.dbcfg)
 # set logging
-        parser_logger = logmp.set_mp_logger("root", logfile, verbose)
+        parser_logger = logmp.set_mp_logger("mparser", options.logcfg)
 # set database
         parser_db = dbmp.ParserDB(db_host, db_user, db_password, db_name)
+# show data from database
+        show_db(options.showdb)
 # parse directory/file
         if filename:
 # if directory
