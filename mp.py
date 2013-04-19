@@ -275,9 +275,13 @@ def get_http(http, fetch_url):
             data = urllib2.urlopen(http).read()
             #.decode("utf-8", "replace")
 # is not reachable if did not get content
-        except:
-            parser_logger.warning("*HTTP* is not reachable...")
-#            print sys.exc_info()
+        except urllib2.HTTPError, e_url:
+            parser_logger.warning("*HTTP* error during fetching: %s, %s" %
+                                  (e_url.code, e_url.reason))
+            return {"reachable": False}
+        except urllib2.URLError, e_url:
+            parser_logger.warning("*HTTP* error during fetching: %s" %
+                                  (e_url.reason,))
             return {"reachable": False}
 # get using subprocess
     elif fetch_url == "SUB":
@@ -297,7 +301,8 @@ def get_http(http, fetch_url):
         (data, err) = p_wget.communicate()
 # if did not return content and exit code not 0
         if not data:
-            parser_logger.warning("*HTTP* is not reachable...")
+            parser_logger.warning("*HTTP* is not reachable, %s - errors..." %
+                                  (err,))
             return {"reachable": False}
 # fetching method must be a URL or SUB
     else:
@@ -321,7 +326,8 @@ def db_update(data):
     for key in data.keys():
 # validate record length up to 255 symbols
         if len(key) > 256:
-            parser_logger.warning("*DB* key length truncated to 256 symbols...")
+            parser_logger.warning("*DB* email or url was "
+                                  "truncated to256 symbols...")
             key = key[:256]
 # if current/new matched previous/old element and not url = email
         if "://" in key:
@@ -407,7 +413,8 @@ def msg_from_file(file_name, hash_sign, fetch_url):
     message = email.message_from_string(load_data)
 # if data from file does not have fields FROM&TO then it does not valid message
     if (not message.get("from")) and (not message.get("to")):
-        parser_logger.error("%s - MSG is not a valid email message..." % (file_name,))
+        parser_logger.error("%s - MSG is not a valid email message..." %
+                            (file_name,))
         return
 # get the hash data as string depending on FILE hash sign
     if hash_sign == "FILE":
@@ -461,19 +468,6 @@ def set_db_ini(dbcfg):
         sys.exit(1)
 
 
-def show_db(showdb):
-    """
-    show data only from current database and exit
-    : param showdb: show database = 1 | not show = 0 (string)
-    """
-    if showdb == "1":
-        parser_db.db_show()
-        sys.exit(0)
-    elif showdb not in ("1", "0"):
-        parser_logger.error("*CFG* show DATABASE bad parameter...")
-        sys.exit(1)
-
-
 def set_mp_ini(cfg):
     """
     read and return mail parser parameters from INI file
@@ -501,6 +495,35 @@ def set_mp_ini(cfg):
     else:
         print "CONFIGFILE must exist..."
         sys.exit(1)
+
+
+def show_db():
+    """
+    show current data stored in database and exit
+    """
+    db_data = parser_db.db_show()
+    if not db_data:
+        parser_logger.warning("*DB* no data from database...")
+        sys.exit(1)
+    if db_data.get("hashes"):
+        print "HASHES"
+        print "\n".join(["HASH %s SIGN %s" % (key, value) for key,
+                        value in db_data["hashes"].items()])
+    else:
+        print "table HASHES is empty"
+    if db_data.get("emails"):
+        print "EMAILS"
+        print "\n".join(["EMAIL %s VALUE %s" % (key, value) for key,
+                        value in db_data["emails"].items()])
+    else:
+        print "table EMAILS is empty"
+    if db_data.get("urls"):
+        print "URLS"
+        print "\n".join(["URL %s VALUE %s" % (key, value) for key,
+                        value in db_data["urls"].items()])
+    else:
+        print "table URLS is empty"
+    sys.exit(0)
 # end of functions
 
 
@@ -512,7 +535,10 @@ def main():
     global parser_logger
     global parser_db
 # defaults
-    usage = "usage: %prog -c CONFIGFILE -d DATABASECONFIG -l LOGGINGCONFIG"
+    usage = "usage: %prog -c CONFIGFILE " \
+            "-d DATABASECONFIG " \
+            "-l LOGGINGCONFIG " \
+            "-s SHOWDB=0|1"
 # parsing the CLI string for options and arguments
     mailparser = optparse.OptionParser(usage,
                 epilog = "MSG parser - "
@@ -538,7 +564,12 @@ def main():
 # set database
         parser_db = dbmp.ParserDB(db_host, db_user, db_password, db_name)
 # show data from database
-        show_db(options.showdb)
+        if options.showdb == "1":
+            show_db()
+            sys.exit(0)
+        elif options.showdb not in ("1", "0"):
+            parser_logger.error("*CFG* bad SHOWDB option...")
+            sys.exit(1)
 # parse directory/file
         if filename:
 # if directory
@@ -566,9 +597,10 @@ def main():
             sys.exit(1)
 # if something went wrong in general get exception info for debugging
     except Exception:
+        import traceback
 #        mailparser.print_help()
-        print ("general exception...")
-        print sys.exc_info()
+        print("generic exception: \n %s" % (traceback.format_exc(),))
+#        print sys.exc_info()
 #        parser_logger.error("general exception...")
 #        parser_logger.error(sys.exc_info())
         sys.exit(1)

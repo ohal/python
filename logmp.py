@@ -24,32 +24,28 @@ def set_mp_logger(log_name, logcfg):
     : param logcnf: name of logging INI file (string)
     : return mp_logger: return a logger with the specified name (class)
     """
-# default stream and loglevel
-    ini_stream = "console"
-    ini_level = "3"
-# default logging output format
-    formatter = logging.Formatter("%(asctime)s %(levelname)s:%(filename)s:"
-                                  "%(module)s.%(funcName)s:"
-                                  "%(lineno)d - %(message)s",
-                                  "%d/%m/%Y %H:%M:%S")
 # set instance class logger with name
     mp_logger = logging.getLogger(log_name)
-# set options from INI file if exist, all options will be overriden
-    config = ConfigParser.SafeConfigParser({"logfile": "console",
-                                            "verbose": "3"})
 # if config INI is set just read actual options from INI
     if os.path.isfile(logcfg):
+# set options from INI file if exist, all options will be overriden
+        config = ConfigParser.SafeConfigParser({"logfile": "console",
+                                            "verbose": "3"})
         config.read(logcfg)
 # logfile: file name for log messages
-        log_stream = config.get("logging","logfile")
+        log_stream = config.get("logging", "logfile")
 # verbose: verbose level for log messages
-        log_level = config.get("logging","verbose")
+        log_level = config.get("logging", "verbose")
     else:
         print "*LOG* INI file does not exist, set logging to default..."
-        log_stream, log_level = ini_stream, ini_level
+        log_stream, log_level = "console", "3"
 # logging depends on console, syslog or file output
     if log_stream == "console":
-# if console output then handler is sys.stderr
+# if console output then handler is sys.stderr and logging format
+        formatter = logging.Formatter("%(asctime)s %(levelname)s:%(filename)s:"
+                                      "%(module)s.%(funcName)s:"
+                                      "%(lineno)d - %(message)s",
+                                      "%d/%m/%Y %H:%M:%S")
         hdlr = logging.StreamHandler(sys.stderr)
     elif log_stream == "syslog":
 # if syslog output then handler is /dev/syslog
@@ -59,6 +55,10 @@ def set_mp_logger(log_name, logcfg):
         hdlr = logging.handlers.SysLogHandler(address="/dev/log")
     else:
 # if file output then handler is file
+        formatter = logging.Formatter("%(asctime)s %(levelname)s:%(filename)s:"
+                                      "%(module)s.%(funcName)s:"
+                                      "%(lineno)d - %(message)s",
+                                      "%d/%m/%Y %H:%M:%S")
         hdlr = logging.FileHandler(log_stream)
 # add the handler
     mp_logger.addHandler(hdlr)

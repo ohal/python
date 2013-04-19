@@ -18,36 +18,49 @@ db_logger = logging.getLogger("mparser")
 
 
 # sql decorator
-def query_wrapper(sql):
+def query_wrapper(db_obj):
     """
-    query decorator
+    database query decorator, got an object
     """
-    def wrapper(self, *args, **kwargs):
+    def sql_wrapper(sql):
         """
-        query wrapper
+        function wrapper, got a function
         """
-        try:
-            conn = mdb.connect(self.host,
-                               self.user,
-                               self.passwd,
-                               self.d_base,
-                               use_unicode=True)
-            conn.set_character_set("utf8")
-            cur = conn.cursor()
-            cur.execute("SET NAMES utf8;")
-            cur.execute("SET AUTOCOMMIT=1;")
+        def wrapper(*args, **kwargs):
+            """
+            query wrapper, got args, kwargs
+            """
+#            print db_obj
+#            print sql
 #            print "wrapper args: %s, kwargs: %s" % (args, kwargs)
-# pass cursor as argument
-            data = sql(self, cur)
-        except mdb.Error, e_mdb:
-            db_logger.error("*DB* error %d: %s" %
-                            (e_mdb.args[0], e_mdb.args[1]))
-            data = None
-        finally:
-            conn.close()
-#            print "wrapper data", data
+            try:
+                conn = mdb.connect(db_obj.host,
+                                   db_obj.user,
+                                   db_obj.passwd,
+                                   db_obj.d_base,
+                                   use_unicode=True)
+                try:
+                    conn.set_character_set("utf8")
+                    cur = conn.cursor()
+                    cur.execute("SET NAMES utf8;")
+                    cur.execute("SET AUTOCOMMIT=1;")
+# pass all arguments, cursor as well
+                    data = sql(cur, *args, **kwargs)
+                    cur.close()
+                except mdb.Error, e_mdb:
+                    db_logger.error("*DB* cursor error %d: %s" %
+                                    (e_mdb.args[0], e_mdb.args[1]))
+                    data = None
+                finally:
+                    conn.close()
+            except mdb.Error, e_mdb:
+                db_logger.error("*DB* connector error %d: %s" %
+                                (e_mdb.args[0], e_mdb.args[1]))
+                data = None
+#            print data
             return data
-    return wrapper
+        return wrapper
+    return sql_wrapper
 
 
 # classes
@@ -55,6 +68,7 @@ class ParserDB(object):
     """
     mail parser database
     """
+# constructor
     def __init__(self, host, user, passwd, d_base):
         """
         constructor
@@ -70,96 +84,99 @@ class ParserDB(object):
         """
         show whole database
         """
-        @query_wrapper
-        def inner(self, *args, **kwargs):
+        @query_wrapper(self)
+        def inner(cur):
             """
             inner sql
             """
-#            print "db show args: %s, kwargs: %s" % (args, kwargs)
+            db_dct = {}
+            b_sign = lambda x: x == u"\x01" and True or False
 # set cursor from argument
-            cur = args[0]
-            print "DATABASE, 'hashes' table"
             cur.execute("SELECT * "
                         "FROM hashes;")
+# get all from database table hashes
             rows = cur.fetchall()
+# put to the dictionary selected data
             for row in rows:
-                print ("SIGN %s CRC %s" % (row[1], row[0]))
-            print "DATABASE, 'emails' table"
+                db_dct.setdefault("hashes", {}).setdefault(row[0], row[1])
+# get all from database table emails
             cur.execute("SELECT * "
                         "FROM emails;")
             rows = cur.fetchall()
+# put to the dictionary selected data
             for row in rows:
-                print ("EMAIL %s FROM %s TO %s CC %s BCC %s BODY %s" %
-                       (row[0], row[1], row[2], row[3], row[4], row[5]))
-            print "DATABASE, 'urls' table"
+                for key, value in {"from": 1, "to": 2, 
+                                   "cc": 3, "bcc": 4, "body": 5}.items():
+                    db_dct.setdefault("emails",
+                                      {}).setdefault(row[0],
+                                      {}).setdefault(key, row[value])
+# get all from database table urls
             cur.execute("SELECT * "
                         "FROM urls;")
             rows = cur.fetchall()
+# put to the dictionary selected data
             for row in rows:
-                print ("URL %s REACHABLE %s EMAILS %s URLS %s" %
-                       (row[0], row[1], row[2], row[3]))
-        return inner(self)
+                db_dct.setdefault("urls",
+                                  {}).setdefault(row[0],
+                                  {}).setdefault("reachable", b_sign(row[1]))
+                for key, value in {"emails": 2, "urls": 3}.items():
+                    db_dct.setdefault("urls",
+                                      {}).setdefault(row[0],
+                                      {}).setdefault(key, row[value])
+#            print db_dct
+            return db_dct
+        return inner()
 
 
     def hash_check(self, hash_val, hash_met):
         """
         check if hash stored in database
         """
-        @query_wrapper
-        def inner(self, *args, **kwargs):
+        @query_wrapper(self)
+        def inner(cur):
             """
             inner sql
             """
-#            print "hash check: %s, %s" % (args, kwargs)
-#            print hash_val, hash_met
 # set cursor from argument
-            cur = args[0]
             cur.execute("SELECT 1 "
                         "FROM hashes "
                         "WHERE hash = '%s' "
                         "AND sign = '%s';" %
                         (hash_val, hash_met))
             query = cur.fetchone()
-#            print "query", query
             return query
-        return inner(self)
+        return inner()
 
 
     def hash_save(self, hash_val, hash_met):
         """
         store hash in database
         """
-        @query_wrapper
-        def inner(self, *args, **kwargs):
+        @query_wrapper(self)
+        def inner(cur):
             """
             inner sql
             """
-#            print "hash save: %s, %s" % (args, kwargs)
-#            print hash_val, hash_met
 # set cursor from argument
-            cur = args[0]
             cur.execute("INSERT INTO hashes (hash, sign) "
                         "VALUES ('%s', '%s');" %
                     (hash_val, hash_met))
             query = cur.fetchone()
-#            print "query", query
             return query
-        return inner(self)
+        return inner()
 
 
     def url_update(self, url, data):
         """
         update database table urls
         """
-        @query_wrapper
-        def inner(self, *args, **kwargs):
+        @query_wrapper(self)
+        def inner(cur):
             """
             inner sql
             """
-#            print "url update: %s, %s" % (args, kwargs)
 # set cursor from argument
-            cur = args[0]
-# if url stored
+# check if url stored
             if cur.execute("SELECT 1 "
                            "FROM urls "
                            "WHERE url = '%s';" %
@@ -184,22 +201,20 @@ class ParserDB(object):
                 db_logger.debug("*DB* inserted to table urls %s" % (url,))
             query = cur.fetchone()
             return query
-        return inner(self)
+        return inner()
 
 
     def email_update(self, email, data):
         """
         update database table emails
         """
-        @query_wrapper
-        def inner(self, *args, **kwargs):
+        @query_wrapper(self)
+        def inner(cur):
             """
             inner sql
             """
-#            print "email update: %s, %s" % (args, kwargs)
 # set cursor from argument
-            cur = args[0]
-# if email stored
+# check if email stored
             if cur.execute("SELECT 1 "
                            "FROM emails "
                            "WHERE email = '%s';" %
@@ -230,5 +245,5 @@ class ParserDB(object):
                 db_logger.debug("*DB* inserted to table emails %s" % (email,))
             query = cur.fetchone()
             return query
-        return inner(self)
+        return inner()
 # end of methods
