@@ -1,3 +1,5 @@
 image: python2.7
 script:
   - echo hello world
+  - pylint logmp.py
+

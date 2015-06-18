@@ -295,9 +295,9 @@ def get_http(http, fetch_url):
                             --user-agent=Mozilla/4.0 \
                             \(compatible\
                             \; MSIE 5.5\; Windows NT\)" %(http,),
-                             shell = True,
-                             stdout = subprocess.PIPE,
-                             stderr = subprocess.STDOUT)
+                             shell=True,
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT)
         (data, err) = p_wget.communicate()
 # if did not return content and exit code not 0
         if not data:
@@ -455,10 +455,10 @@ def set_db_ini(dbcfg):
                                              "dbname": ""})
     if os.path.isfile(dbcfg):
         confdb.read(dbcfg)
-        host = confdb.get("db","host")
-        user =  confdb.get("db","user")
-        password = confdb.get("db","password")
-        name = confdb.get("db","dbname")
+        host = confdb.get("db", "host")
+        user = confdb.get("db", "user")
+        password = confdb.get("db", "password")
+        name = confdb.get("db", "dbname")
         if not (host and user and password and name):
             print "wrong format or data in DATABASECONFIG..."
             sys.exit(1)
@@ -483,11 +483,11 @@ def set_mp_ini(cfg):
     if os.path.isfile(cfg):
         config.read(cfg)
 # filename: configuration file name
-        filename = config.get("msg","filename")
+        filename = config.get("msg", "filename")
 # hashsign: count hash of message by file or body only FILE|BODY
-        hashsign = config.get("msg","hashsign")
+        hashsign = config.get("msg", "hashsign")
 # fetchurl: method of fetching content from web URL|SUB (str)
-        fetchurl = config.get("msg","fetchurl")
+        fetchurl = config.get("msg", "fetchurl")
         if not (filename and hashsign and fetchurl):
             print "wrong format or data in CONFIGFILE..."
             sys.exit(1)
@@ -541,7 +541,7 @@ def main():
             "-s SHOWDB=0|1"
 # parsing the CLI string for options and arguments
     mailparser = optparse.OptionParser(usage,
-                epilog = "MSG parser - "
+                epilog="MSG parser - "
                 "parse MSG file for valid emails&urls, "
                 "save result and log")
     mailparser.add_option("-c", "--config", dest="cfg", default="default.cfg",
@@ -599,7 +599,7 @@ def main():
     except Exception:
         import traceback
 #        mailparser.print_help()
-        print("generic exception: \n %s" % (traceback.format_exc(),))
+        print("generic exception: \n %s" % traceback.format_exc(),)
 #        print sys.exc_info()
 #        parser_logger.error("general exception...")
 #        parser_logger.error(sys.exc_info())
